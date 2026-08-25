@@ -15,6 +15,19 @@ $ExcludedDirectoryNames = @(
   ".git", ".venv", "node_modules", "target", "dist", "release", "release-local"
 )
 
+# Transfer bundles deliberately carry private provider state. A local source
+# checkout may keep one beside the router while preparing another machine, but
+# deployment must never copy it into the installed router.
+$TransferBundleDirectoryNames = @(
+  Get-ChildItem -LiteralPath $sourceDir -Directory -Force |
+    Where-Object {
+      (Test-Path -LiteralPath (Join-Path $_.FullName "router.bundle") -PathType Leaf) -and
+      (Test-Path -LiteralPath (Join-Path $_.FullName "provider-state") -PathType Container)
+    } |
+    ForEach-Object { $_.Name }
+)
+$ExcludedSourceDirectoryNames = @($ExcludedDirectoryNames + $TransferBundleDirectoryNames)
+
 function Get-NormalizedDirectory([string]$Path) {
   return [IO.Path]::GetFullPath($Path).TrimEnd([char[]]@('\', '/'))
 }
@@ -35,7 +48,7 @@ function Get-DeploySourceFiles {
     foreach ($Entry in Get-ChildItem -LiteralPath $Directory -Force) {
       if ($Entry.PSIsContainer) {
         if (($Entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
-            $ExcludedDirectoryNames -notcontains $Entry.Name) {
+            $ExcludedSourceDirectoryNames -notcontains $Entry.Name) {
           $Pending.Push($Entry.FullName)
         }
         continue
@@ -160,13 +173,7 @@ if ($PSCmdlet.ShouldProcess($installDir, "copy router source")) {
     "/W:1",
     "/XJ",
     "/XD",
-    ".git",
-    ".venv",
-    "node_modules",
-    "target",
-    "dist",
-    "release",
-    "release-local"
+    $ExcludedSourceDirectoryNames
   )
   # From PowerShell 7.4, $PSNativeCommandUseErrorActionPreference defaults to
   # true, so under $ErrorActionPreference = "Stop" a robocopy that copied files

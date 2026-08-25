@@ -55,6 +55,10 @@ test("the local deploy helper copies source without purging target-only files", 
   for (const directory of [".git", ".venv", "node_modules", "target", "dist", "release"]) {
     assert.match(source, new RegExp(`"${directory.replace(".", "\\.")}"`));
   }
+  assert.match(source, /\$TransferBundleDirectoryNames/);
+  assert.match(source, /Join-Path \$_\.FullName "router\.bundle"/);
+  assert.match(source, /Join-Path \$_\.FullName "provider-state"/);
+  assert.match(source, /\$ExcludedSourceDirectoryNames -notcontains \$Entry\.Name/);
   assert.match(source, /\$CopyExitCode\s*=\s*\$LASTEXITCODE/);
   assert.match(source, /if \(\$CopyExitCode -gt 7\)/);
 });
