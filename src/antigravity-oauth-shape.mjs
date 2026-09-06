@@ -21,14 +21,14 @@ const MODEL_FAMILIES = Object.freeze({
       high: "gemini-pro-agent",
     }),
   }),
-  "gemini-3.5-flash": Object.freeze({
+  "gemini-3.8-flash": Object.freeze({
     defaultEffort: "medium",
     maxOutputTokens: 65536,
-    thinkingBudgets: Object.freeze({ low: 1000, medium: 4000, high: 10000 }),
+    thinkingBudgets: Object.freeze({ low: 1000, medium: 4000, high: -1 }),
     models: Object.freeze({
-      low: "gemini-3.5-flash-extra-low",
-      medium: "gemini-3.5-flash-low",
-      high: "gemini-3-flash-agent",
+      low: "gemini-3.8-flash-low",
+      medium: "gemini-3.8-flash-medium",
+      high: "gemini-3.8-flash-high",
     }),
   }),
   "gemini-3.6-flash": Object.freeze({

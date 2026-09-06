@@ -36,9 +36,9 @@ test("provider registry exposes configured API and OAuth model families", () => 
     [
       "anthropic-api/claude-opus-4.8",
       "antigravity-oauth/gemini-3.1-pro",
-      "antigravity-oauth/gemini-3.5-flash",
       "antigravity-oauth/gemini-3.6-flash",
       "antigravity-oauth/gemini-3.7-flash",
+      "antigravity-oauth/gemini-3.8-flash",
       "clinepass/deepseek-v4-flash",
       "clinepass/deepseek-v4-pro",
       "clinepass/glm-5.2",
@@ -731,6 +731,21 @@ test("provider registry exposes configured API and OAuth model families", () => 
     MODEL_BY_SLUG.get("deepseek/deepseek-v4-flash-vision-exp").inputModalities,
     ["text", "image"],
   );
+});
+
+test("Antigravity Flash picker defaults match the official medium tier", () => {
+  for (const slug of [
+    "antigravity-oauth/gemini-3.8-flash",
+    "antigravity-oauth/gemini-3.6-flash",
+    "antigravity-oauth/gemini-3.7-flash",
+  ]) {
+    assert.equal(MODEL_BY_SLUG.get(slug).defaultEffort, "medium", slug);
+  }
+  const gemini38 = MODEL_BY_SLUG.get("antigravity-oauth/gemini-3.8-flash");
+  assert.equal(gemini38.contextWindow, 1_048_576);
+  assert.equal(gemini38.autoCompact, 900_000);
+  assert.deepEqual(gemini38.inputModalities, ["text", "image"]);
+  assert.equal(gemini38.multiAgentVersion, undefined);
 });
 
 test("only checked-in Gemini reseller models opt into trailing model-turn trimming", () => {
