@@ -81,6 +81,7 @@ test("deploy runs the installed canonical transaction and doctor without replaci
 test("deploy and install preserve the existing tray opt-in", () => {
   const deploy = readScript("deploy-codex-router.ps1");
   const install = readScript("install.ps1");
+  const setup = readScript("src/setup.mjs");
 
   assert.match(deploy, /\$TrayWasInstalled\s*=\s*\(Get-TrayStatus\)\.installed -eq \$true/);
   const trayGate = deploy.indexOf("if ($TrayWasInstalled)");
@@ -108,7 +109,11 @@ test("deploy and install preserve the existing tray opt-in", () => {
   const refresh = install.indexOf("codex-router.ps1\") tray install");
   assert.ok(status >= 0 && status < health, "tray presence must be captured before installation");
   assert.ok(refresh > health, "an existing tray is refreshed only after router health");
-  assert.match(install, /if \(\$TrayWasInstalled\) \{/);
+  assert.match(
+    install,
+    /if \(\$TrayWasInstalled -and -not \$NoTray -and \$env:CODEX_ROUTER_DEFER_TRAY_REBUILD -ne "1"\)/,
+  );
+  assert.match(install, /elseif \(\$TrayWasInstalled -and -not \$NoTray\)/);
   assert.match(install, /\$env:MODEL_ROUTER_TARGET\s*=\s*"codex"/);
   assert.match(install, /\$env:MODEL_ROUTER_TARGET\s*=\s*\$SavedRouterTarget/);
   assert.match(install, /\$TrayExitCode\s*=\s*\$LASTEXITCODE/);
@@ -116,6 +121,11 @@ test("deploy and install preserve the existing tray opt-in", () => {
   assert.match(install, /codex-router\.ps1 tray repair/);
   assert.match(install, /CODEX_ROUTER_DEFER_TRAY_REBUILD -ne "1"/);
   assert.match(install, /Desktop companion refresh deferred until the Control Center mutation completes/);
+  assert.match(
+    setup,
+    /"-Target",[\s\S]*?TARGET,[\s\S]*?\.\.\.\(noTray \? \["-NoTray"\] : \[\]\)/,
+    "--no-tray must reach the checkout installer that owns existing-tray refresh",
+  );
 });
 
 test("Windows refreshes managed Codex skills as a best-effort post-install step", () => {

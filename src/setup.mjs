@@ -677,6 +677,9 @@ async function main() {
         "-CheckoutInstall",
         "-Target",
         TARGET,
+        // The checkout transaction owns existing-companion refresh. Preserve
+        // --no-tray so transfer installers can publish their verified build.
+        ...(noTray ? ["-NoTray"] : []),
         ...(adoptNativeCatalog ? ["-AdoptNativeCatalog"] : []),
       ]);
     } else {

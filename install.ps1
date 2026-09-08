@@ -540,7 +540,7 @@ try {
   # `exit` would otherwise terminate this installer before the status could be
   # checked. This remains best effort, matching bin/install: an optional Rust
   # or Electron build failure must not roll back a healthy router update.
-  if ($TrayWasInstalled -and $env:CODEX_ROUTER_DEFER_TRAY_REBUILD -ne "1") {
+  if ($TrayWasInstalled -and -not $NoTray -and $env:CODEX_ROUTER_DEFER_TRAY_REBUILD -ne "1") {
     $SavedRouterTarget = $env:MODEL_ROUTER_TARGET
     try {
       # The tray belongs to the shared router plane. codex-router.ps1 is the
@@ -557,7 +557,7 @@ try {
     } finally {
       $env:MODEL_ROUTER_TARGET = $SavedRouterTarget
     }
-  } elseif ($TrayWasInstalled) {
+  } elseif ($TrayWasInstalled -and -not $NoTray) {
     # A Control Center cannot synchronously rebuild the executable that is
     # running this installer: stop/drain waits for the caller's mutation, while
     # the caller waits for install.ps1. The UI launches a detached `control tray
