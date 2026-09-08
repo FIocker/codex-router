@@ -3171,11 +3171,15 @@ async function buildRoutedRequest({ request, payload, route, agedInput }) {
       tools = repairToolSchemaRoots(tools, { nonRecursive: true });
     }
   }
-  // The stored call history must use the same tool names as the tool list, or
-  // the model copies the bare names out of its own transcript.
+  // Stored call history and forced choices must use the same tool names as the
+  // provider-facing list, or the model/request validator sees two identities.
   if (namespacesFlattened) {
     routedInput = flattenNamespacedHistory(routedInput, flattenedNamespaces);
-    if (provider?.id === "groq") {
+    if (
+      provider?.id === "groq" ||
+      provider?.id === "commandcode" ||
+      provider?.id === "commandcode-messages"
+    ) {
       routedToolChoice = flattenToolChoice(
         routedToolChoice,
         flattenedNamespaces,

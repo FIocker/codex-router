@@ -194,6 +194,9 @@ export const CHATGPT_ACCOUNT_HOMES_DIR =
   process.env.MODEL_ROUTER_CHATGPT_ACCOUNT_HOMES ||
   path.join(STATE_DIR, "chatgpt-accounts");
 export const CHATGPT_PROFILE_SWITCH_PATH = path.join(STATE_DIR, "chatgpt-profile-switch.json");
+export const CHATGPT_ACCOUNT_SWITCH_PREFERENCE_PATH =
+  process.env.MODEL_ROUTER_CHATGPT_ACCOUNT_SWITCH_PREFERENCE ||
+  path.join(STATE_DIR, "chatgpt-account-switch-preference.json");
 // User-defined OpenAI-compatible provider descriptors. The document contains
 // no raw credentials; credentialRef values point to the provider-neutral store.
 export const GENERIC_PROVIDERS_PATH =

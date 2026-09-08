@@ -54,6 +54,11 @@ test("account selection persists without replacing another saved login", () => {
   assert.equal(selected.policy.selectedAccountId, added.id);
   const status = run("chatgpt-account-pool", "status");
   assert.equal(status.policy.mode, "switch");
+  assert.deepEqual(status.preferences, {
+    version: 1,
+    autoRestart: false,
+    state: "default",
+  });
   assert.equal(status.profile.desired, added.id);
   assert.equal(status.profile.pending, status.profile.running);
   assert.equal(status.accounts[added.id].label, "Secondary");
@@ -78,6 +83,15 @@ test("account selection persists without replacing another saved login", () => {
     () => run("chatgpt-account-pool", "remove", pendingTarget),
     /pending native profile selection/i,
   );
+});
+
+test("account auto-restart preference is explicit, durable, and defaults back off", () => {
+  const enabled = run("chatgpt-account-pool", "auto-restart", "on");
+  assert.equal(enabled.preferences.autoRestart, true);
+  assert.equal(run("chatgpt-account-pool", "status").preferences.autoRestart, true);
+  const disabled = run("chatgpt-account-pool", "auto-restart", "off");
+  assert.equal(disabled.preferences.autoRestart, false);
+  assert.equal(run("chatgpt-account-pool", "status").preferences.autoRestart, false);
 });
 
 test("no-discovery account reads never import account modules or create pool state", () => {
@@ -139,6 +153,8 @@ test("one production account status poll owns pending profile reconciliation", (
   assert.doesNotMatch(accountUsage, /reconcileChatGPTProfileSwitchIfReady/);
   assert.match(accountPool, /if \(!action \|\| action === "status"\)[\s\S]*?await reconcileChatGPTProfileSwitchIfReady\(\)/);
   assert.match(accountPool, /await refreshBoundedChatGPTSubscriptionAccounts\(beforeRefresh\)/);
+  assert.match(accountPool, /readChatGPTAccountSwitchPreference\(\)/);
+  assert.match(accountPool, /preferences\.autoRestart[\s\S]*?withRestartedCodexDesktop\(select\)/);
   assert.match(accountPool, /attentionRequired[\s\S]*?retryable: false[\s\S]*?previous sign-in may still be running/i);
   assert.doesNotMatch(accountPool, /\.map\(\(account\) => refreshChatGPTSubscriptionAccount/);
 });

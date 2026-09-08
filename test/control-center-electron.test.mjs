@@ -1359,6 +1359,7 @@ test("preload constructs exact positional IPC payloads", async () => {
     ["addChatGptSubscriptionAccount", ["Work"], { label: "Work" }],
     ["loginChatGptSubscriptionAccount", ["acct_example_123456"], { accountId: "acct_example_123456" }],
     ["removeChatGptSubscriptionAccount", ["acct_example_123456"], { accountId: "acct_example_123456" }],
+    ["setChatGptAccountAutoRestart", [true], { enabled: true }],
     ["setChatGptAccountSelection", ["acct_example_123456"], { selection: "acct_example_123456" }],
     ["setPresence", ["always"], { mode: "always" }],
     ["controlService", ["start"], { action: "start" }],
@@ -1496,6 +1497,7 @@ test("settings keeps model choice out and exposes durable app preferences", asyn
   assert.match(settings, /addChatGptSubscriptionAccount\(/);
   assert.match(settings, /loginChatGptSubscriptionAccount\(/);
   assert.match(settings, /removeChatGptSubscriptionAccount\(/);
+  assert.match(settings, /setChatGptAccountAutoRestart\(/);
   assert.doesNotMatch(settings, /access_token|refresh_token/);
   assert.doesNotMatch(settings, /runMaintenance/);
   assert.doesNotMatch(settings, /setLoginFree/);
@@ -1801,8 +1803,8 @@ test("persisted Electron toggles render optimistic intent and reconcile failures
   assert.match(models, /optimisticSubagents\.mutate\(/);
   assert.match(local, /optimisticLocalModels\.mutate\(/);
   assert.match(local, /optimisticVision\.mutate\(/);
-  for (const key of ["signed-routing", "tool-result-aging", "native-tool-result-aging", "vision-bridge"]) {
-    assert.match(settings, new RegExp(`optimisticToggles\\.mutate\\(\\"${key}\\"`));
+  for (const key of ["signed-routing", "chatgpt-account-auto-restart", "tool-result-aging", "native-tool-result-aging", "vision-bridge"]) {
+    assert.match(settings, new RegExp(`optimisticToggles\\.mutate\\(\\s*\\"${key}\\"`));
   }
 });
 
@@ -1907,6 +1909,10 @@ test("harness and context IPC remain fixed and session-scoped", async () => {
     "the detached login owner must be checked before account removal starts",
   );
   assert.doesNotMatch(chatgptLogin, /openTerminalCommand/);
+  const chatgptAutoRestart = source.match(/handleAction\("setChatGptAccountAutoRestart"[\s\S]*?\n  \}\);/)?.[0];
+  assert.ok(chatgptAutoRestart, "ChatGPT account auto-restart handler should be readable");
+  assert.match(chatgptAutoRestart, /typeof enabled !== "boolean"/);
+  assert.match(chatgptAutoRestart, /"chatgpt-account-pool", "auto-restart", enabled \? "on" : "off"/);
   assert.match(source, /const CHATGPT_LOGIN_URL/);
   assert.match(source, /stdio: \["ignore", "pipe", "pipe"\]/);
   assert.match(source, /openExternal\(match\[0\]\)/);

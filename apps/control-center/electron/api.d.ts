@@ -123,6 +123,10 @@ export interface ChatGptAccountPool {
   }>;
   sessions: { count: number };
   profile?: ChatGptProfileSwitch;
+  preferences?: {
+    autoRestart: boolean;
+    state: "default" | "configured" | "unavailable";
+  };
 }
 
 export interface ChatGptProfileSwitch {
@@ -189,6 +193,7 @@ export interface RouterControl {
   addChatGptSubscriptionAccount(label?: string): Promise<unknown>;
   loginChatGptSubscriptionAccount(accountId: string): Promise<unknown>;
   removeChatGptSubscriptionAccount(accountId: string): Promise<unknown>;
+  setChatGptAccountAutoRestart(enabled: boolean): Promise<unknown>;
   setChatGptAccountSelection(selection: string): Promise<unknown>;
   setPresence(mode: PresenceMode): Promise<unknown>;
   controlService(action: ServiceAction): Promise<unknown>;

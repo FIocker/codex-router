@@ -2434,7 +2434,6 @@ export class NamespaceToolCallTransform extends Transform {
   #injectOnly = false;
   #interruptedTargets = new Set();
   #lastSequence = 0;
-  #interruptSeq = 0;
   #injectQueue = [];
   #injectionsDone = false;
   #lastInjectedCalls = [];
@@ -3736,9 +3735,10 @@ export class NamespaceToolCallTransform extends Transform {
     const blocks = [];
     const injectedCalls = [];
     for (const target of remaining) {
-      this.#interruptSeq += 1;
-      const callId = `call_router_interrupt_${this.#interruptSeq}`;
-      const call = buildInterruptAgentCall(target, { callId });
+      // Each transform is request-scoped, so a local counter would restart on
+      // every turn and reuse call IDs that remain in Codex conversation history.
+      // Use the same fresh-ID helper as the non-stream injection path instead.
+      const call = buildInterruptAgentCall(target);
       this.#interruptedTargets.add(target);
       injectedCalls.push(call);
       const addedSeq = this.#lastSequence + 1;

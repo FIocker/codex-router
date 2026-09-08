@@ -3138,6 +3138,10 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
     removeChatGPTProfileAccount,
     selectChatGPTProfileAccount,
   } = await import("./chatgpt-profile-switch.mjs");
+  const {
+    readChatGPTAccountSwitchPreference,
+    setChatGPTAccountSwitchAutoRestart,
+  } = await import("./chatgpt-account-switch-preference.mjs");
 
   if (!action || action === "status") {
     // This is the single production reconcile poll, owned by the Control
@@ -3150,6 +3154,7 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
     await refreshBoundedChatGPTSubscriptionAccounts(beforeRefresh);
     const safe = chatGPTSubscriptionAccountPoolSnapshot();
     const profile = chatGPTProfileSwitchSnapshot();
+    const preferences = readChatGPTAccountSwitchPreference();
     const loginAttempts = {};
     for (const failure of recovery.failures) {
       const account = safe.accounts?.[failure.accountId];
@@ -3192,6 +3197,7 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
       ...safe,
       ...(Object.keys(loginAttempts).length ? { loginAttempts } : {}),
       profile,
+      preferences,
       sessions: { count: Object.keys(safe.sessions || {}).length },
     })}\n`);
     return;
@@ -3227,13 +3233,30 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
     process.stdout.write(`${JSON.stringify(result.removed)}\n`);
     return;
   }
+  if (action === "auto-restart") {
+    if (!["on", "off"].includes(value)) {
+      throw new Error("Usage: control chatgpt-account-pool auto-restart <on|off>");
+    }
+    const preferences = setChatGPTAccountSwitchAutoRestart(value === "on");
+    process.stdout.write(`${JSON.stringify({ preferences })}\n`);
+    return;
+  }
   if (action === "select") {
     const selection = String(value || "").trim();
     if (!/^acct_[A-Za-z0-9_-]{8,80}$/.test(selection)) {
       throw new Error("Select a registered ChatGPT account id.");
     }
-    const { pool, profile } = await selectChatGPTProfileAccount(selection);
-    process.stdout.write(`${JSON.stringify({ ...pool, profile })}\n`);
+    const preferences = readChatGPTAccountSwitchPreference();
+    const select = () => selectChatGPTProfileAccount(selection);
+    let selected;
+    if (preferences.autoRestart) {
+      const { withRestartedCodexDesktop } = await import("./codex-desktop-lifecycle.mjs");
+      selected = await withRestartedCodexDesktop(select);
+    } else {
+      selected = await select();
+    }
+    const { pool, profile } = selected;
+    process.stdout.write(`${JSON.stringify({ ...pool, profile, preferences })}\n`);
     return;
   }
   if (action === "profile") {
@@ -3246,7 +3269,7 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
       return;
     }
   }
-  throw new Error("Usage: control chatgpt-account-pool status|add [label]|home <acct_id>|login-finalize <acct_id> <lease>|remove <acct_id>|select <acct_id>|profile status|profile reconcile");
+  throw new Error("Usage: control chatgpt-account-pool status|add [label]|home <acct_id>|login-finalize <acct_id> <lease>|remove <acct_id>|auto-restart <on|off>|select <acct_id>|profile status|profile reconcile");
 }
 
 // The public `/health` leaf intentionally contains only the router summary and

@@ -1904,8 +1904,15 @@ export function registerIpcHandlers({
     }
     return runJson(["chatgpt-account-pool", "remove", id], { timeoutMs: 60_000 });
   });
+  handleAction("setChatGptAccountAutoRestart", async ({ enabled } = {}) => {
+    if (typeof enabled !== "boolean") throw new Error("enabled must be boolean.");
+    return runJson(
+      ["chatgpt-account-pool", "auto-restart", enabled ? "on" : "off"],
+      { timeoutMs: 60_000 },
+    );
+  });
   handleAction("setChatGptAccountSelection", async ({ selection } = {}) => {
-    return runJson(["chatgpt-account-pool", "select", stringValue(selection, "Account selection", CHATGPT_ACCOUNT_ID)], { timeoutMs: 60_000 });
+    return runJson(["chatgpt-account-pool", "select", stringValue(selection, "Account selection", CHATGPT_ACCOUNT_ID)], { timeoutMs: 120_000 });
   });
   handleAction("setPresence", async ({ mode } = {}) => runJson(["presence", "set", oneOf(mode, PRESENCE_MODES, "Presence mode")]));
   handleAction("controlService", async ({ action = "status" } = {}) => {

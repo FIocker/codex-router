@@ -297,10 +297,11 @@ export function SettingsPage({ target, health, presence, chatgptSession, account
   const bridge = target?.modelSettings?.visionBridge;
   const toggleStates = useMemo(() => new Map([
     ["signed-routing", target?.signedRouting === true],
+    ["chatgpt-account-auto-restart", accountPool?.preferences?.autoRestart === true],
     ["tool-result-aging", aging?.enabled === true],
     ["native-tool-result-aging", aging?.nativeEnabled === true],
     ["vision-bridge", bridge?.enabled === true],
-  ]), [aging?.enabled, aging?.nativeEnabled, bridge?.enabled, target?.signedRouting]);
+  ]), [accountPool?.preferences?.autoRestart, aging?.enabled, aging?.nativeEnabled, bridge?.enabled, target?.signedRouting]);
   const optimisticToggles = useOptimisticValues(toggleStates, runAction);
   const toolResultAgingEnabled = optimisticToggles.value("tool-result-aging", aging?.enabled === true);
   // Same split the tray menu shows: the models the operator already pays for,
@@ -374,9 +375,28 @@ export function SettingsPage({ target, health, presence, chatgptSession, account
               </InlineNotice>
             ) : accountPool?.profile?.pending ? (
               <InlineNotice tone="neutral" title="Account switch pending">
-                Close Codex completely. The selected login will be activated before the next launch.
+                Close ChatGPT completely. The selected login will be activated before the next launch.
               </InlineNotice>
             ) : null}
+            <div className="settings-list">
+              <div className="setting-row">
+                <div>
+                  <strong>Automatically restart ChatGPT when switching accounts</strong>
+                  <small>When ChatGPT is open, close the verified desktop app, switch its login, and reopen it. Leave this off to queue the switch until you quit manually.</small>
+                </div>
+                <Toggle
+                  checked={optimisticToggles.value("chatgpt-account-auto-restart", accountPool?.preferences?.autoRestart === true)}
+                  disabled={!api || Boolean(accountPoolError)}
+                  label="Automatically restart ChatGPT when switching accounts"
+                  onChange={(enabled) => api && void optimisticToggles.mutate(
+                    "chatgpt-account-auto-restart",
+                    enabled,
+                    "Change ChatGPT account restart behavior",
+                    () => api.setChatGptAccountAutoRestart(enabled),
+                  )}
+                />
+              </div>
+            </div>
             <div className="settings-actions subscription-account-create">
               <input
                 aria-label="New ChatGPT account label"

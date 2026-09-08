@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **ChatGPT account selection can now restart the desktop app automatically.**
+  Control Center exposes a persisted, default-off toggle. When enabled, selecting
+  an account closes a running verified ChatGPT desktop process tree, applies the
+  saved login, and reopens the current Store package on Windows or the trusted
+  system app on Linux. A closed app stays closed, and an independent Codex CLI
+  blocks the switch so credentials are never changed underneath a live client.
+
+- **Command Code forced tool choices now use the same bounded alias as the tool definition.**
+  The 64-character compatibility added in #643 shortened provider-facing tool names but
+  left an object `tool_choice` at the client's original spelling, so a forced long tool
+  could still be rejected as unknown. Forced choices for both Command Code variants now
+  pass through the same reversible namespace alias map as the advertised tools.
+
+- **Router-injected subagent interrupts now keep unique call IDs across turns.**
+  Streamed collaboration cleanup previously numbered injected `interrupt_agent`
+  calls from `call_router_interrupt_1` inside each request-scoped transform, so
+  a later turn could reuse an ID still present in Codex conversation history.
+  Stream and non-stream injection now share a UUID-backed call-ID generator,
+  preserving call/output pairing across long multi-turn agent sessions.
+
 - **OpenCode Go Muse Responses routes can continue after a completed web search.**
   Live replay probes for Muse Spark 1.2 and 1.3 Contributor confirmed that the
   Responses upstream accepts completed `web_search_call` history even though
