@@ -2238,42 +2238,25 @@ final class RouterStore: ObservableObject {
 
   // One click covers the whole route into an OAuth provider. CLI-owned routes
   // install and launch their official client; Antigravity uses this router's
-  // local browser flow and stops before its separately labelled live probe.
+  // local browser flow.
   func connectProvider(_ provider: String) async {
-    let setupAction = providerSetup[provider]?.action
-    if setupAction == "probe" {
-      await performProviderOperation(
-        provider,
-        successMessage: "Live compatibility verified and provider enabled. Restart Codex to refresh its model picker."
-      ) {
-        _ = try await runControl(arguments: ["probe-provider", provider, "--live", "--yes"])
-        try await updateProviderSelection(provider, enabled: true)
-      }
-      return
-    }
     let reconnecting = providerSetup[provider]?.configured == true
     let needsInstall = providerSetup[provider]?.cliInstalled != true
     let displayName = providerSetup[provider]?.displayName ?? provider
-    let awaitsAntigravityProbe = provider == "antigravity-oauth" && setupAction == "login"
     await performProviderOperation(
       provider,
       progressMessage: reconnecting
         ? "Opening \(displayName) sign-in in your browser…"
         : "Starting \(displayName) sign-in…",
-      successMessage: awaitsAntigravityProbe
-        ? "Signed in. Run the live compatibility test before enabling this provider."
-        : reconnecting
-          ? "Provider reconnected."
-          : "Provider connected. Restart Codex to refresh its model picker."
+      successMessage: reconnecting
+        ? "Provider reconnected."
+        : "Provider connected. Restart Codex to refresh its model picker."
     ) {
       if needsInstall {
         _ = try await runControl(arguments: ["install-cli", provider])
       }
       _ = try await runControl(arguments: ["login", provider])
-      // Antigravity sign-in deliberately stops before the quota-consuming live
-      // compatibility test. The next, clearly labelled action performs that
-      // test and only then enables the route.
-      if !reconnecting && !awaitsAntigravityProbe {
+      if !reconnecting {
         try await updateProviderSelection(provider, enabled: true)
       }
     }
@@ -2287,11 +2270,9 @@ final class RouterStore: ObservableObject {
       progressMessage: reconnecting
         ? "Opening \(displayName) sign-in in your browser…"
         : "Starting \(displayName) sign-in…",
-      successMessage: provider == "antigravity-oauth"
-        ? "Signed in again. Run the live compatibility test before re-enabling this provider."
-        : reconnecting
-          ? "Provider reconnected."
-          : "Provider connected. Restart Codex to refresh its model picker."
+      successMessage: reconnecting
+        ? "Provider reconnected."
+        : "Provider connected. Restart Codex to refresh its model picker."
     ) {
       _ = try await runControl(arguments: ["login", provider])
       if !reconnecting {

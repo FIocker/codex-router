@@ -1,28 +1,18 @@
 # Model Router installation instructions
 
-## Repository maintenance workflow
-
-- Use `$repo-maintainer` for incoming-change adoption decisions and consequential
-  maintenance that can cross modules, clients, operating systems, installers,
-  providers, credentials, protocols, generated artifacts, or release surfaces.
-- Use its impact analysis and risk-proportional verification before calling such
-  work complete. Skip it for factual replies and obviously isolated trivial
-  edits.
-
 These instructions apply when a user asks an agent to install this repository.
 
 ## Choose the target
 
-- `codex` (the Codex CLI and desktop app), `dsh` (DeepSeek Harness), `gemini`
-  (Gemini CLI), `cursor` (Cursor Agent plus Cursor App), and `claude` (Claude
-  Code through the router-owned launcher), and `openclaw` (OpenClaw through a
-  router-owned Responses provider) are supported
-  targets. OpenCode remains a provider rather than a client target.
-- Cursor is asymmetric: Cursor Agent uses the router's authenticated loopback
-  Connect adapter, while retail Cursor App sends BYOK traffic through Cursor's
-  servers and therefore needs an explicit stable public HTTPS tunnel to the
-  router's separately keyed, app-only edge on port 4214. Never expose the main
-  caller capability or the router port itself to the public Internet.
+- `codex` (the Codex CLI and desktop app), `dsh` (DeepSeek Harness), and
+  `gemini` (Gemini CLI) are the
+  supported targets. If the user asks for Cursor or opencode integration,
+  explain that those targets were removed and the router does not have them;
+  the opencode provider (the Go subscription and the pay-per-use Zen endpoint)
+  remains available as a provider inside both targets.
+- **Cursor is settled in both directions.** It cannot be a target and is not
+  worth having as a provider; see "Cursor was measured and rejected" below
+  before spending an afternoon re-deriving either half.
 - **A target is a client, not a router.** One installation serves all of them:
   one background service, one gateway, one set of provider credentials, one
   provider selection, one set of ports. `MODEL_ROUTER_TARGET` selects which
@@ -46,20 +36,17 @@ user.
 ## Codex procedure
 
 1. Read the host platform and check for Codex, Git, Node.js 22.19+, and `uv` or
-   Python 3.10+. On Windows, also verify that Windows PowerShell reports
-   `FullLanguage` and permits `Add-Type`; the process-tree safety boundary fails
-   closed before mutation under Constrained Language, AppLocker, or WDAC.
-   Read-only checks are allowed. Do not install a package manager or system
-   runtime without the user's permission.
+   Python 3.10+. Read-only checks are allowed. Do not install a package manager
+   or system runtime without the user's permission.
 2. Use a stable checkout: `~/.local/share/codex-router` on macOS/Linux, or
    `%LOCALAPPDATA%\codex-router` on Windows. Do not install the service from a
    temporary clone.
 3. Never ask the user to paste OAuth tokens or API keys into chat, command
    arguments, logs, environment snippets, or tracked files.
 4. Determine which provider IDs the user requested: `anthropic-api`,
-    `kimi-oauth`, `antigravity-oauth`, `kimi-api`, `kimi-api-cn`, `deepseek`, `grok-oauth`, `grok-api`, `qwen-plan`,
-    `zai-coding`, `ollama-cloud`, `minimax-token-plan`, `meta`, `clinepass`,
-    `venice`, `nousresearch`, `chatgpt-web`, and/or
+   `kimi-oauth`, `kimi-api`, `kimi-api-cn`, `deepseek`, `grok-oauth`, `grok-api`,
+   `antigravity-oauth`, `qwen-plan`,
+   `zai-coding`, `ollama-cloud`, `minimax-token-plan`, `meta`, `clinepass`, and/or
    `opencode-go`
    (shown to users as "opencode Go/Zen"; its `opencode-go-messages`,
    `opencode-go-responses`, and `opencode-zen` variants share its stored key
@@ -70,7 +57,7 @@ user.
    shares its stored key and is enabled and disabled with it automatically;
    never select or toggle it separately. Command Code uses its stored or
    environment API key; it has no router-managed CLI sign-in path. The
-   catalog-only providers `groq`, `together`, `fireworks`,
+   catalog-only providers `groq`, `openrouter`, `together`, `fireworks`,
    `cerebras`, `mistral`, `nvidia-nim`, `siliconflow`, `huggingface`,
    `gemini-api`, `github-copilot`, `chutes`, and `orca` are also selectable, but they ship no
    preselected models: after
@@ -78,84 +65,32 @@ user.
    interactive terminal to choose models. If they did not specify and
    credentials already exist, use
    `configured` rather than showing providers that cannot authenticate.
-   `openrouter`, `venice`, and `nousresearch` also ship live-reviewed checked-in
-   presets, so their picker is not empty after the key is stored; anything else
-   on their current account catalogs still has to be curated.
-   `venice` and `nousresearch` are ordinary API-key providers — Venice keys come
-   from venice.ai/settings/api and Nous Portal keys from
-   portal.nousresearch.com; neither has a router-managed CLI sign-in path, and
-   Venice carries a `planNote` because a free Venice account has no API
-   entitlement at all.
-   The anonymous providers `opencode-free` and `kilo-free` are also selectable
-   (`opencode-free-responses` is an internal, single-model protocol variant of
-   the former and is never selected or curated separately),
+   The anonymous providers `opencode-free` and `kilo-free` are also selectable,
    but they need no credential only for their documented free model subsets.
-   `kilo-free` and `opencode-free` are catalog-only and need
+   Both are catalog-only: they ship no preselected models and need
    `bin/curate-models PROVIDER` after selection. `custom` is selectable on the
    same terms and is a container whose models each name their own endpoint, so
    enabling it asks for nothing and curating it is unnecessary. All three must
    be selected explicitly; never select one on the user's behalf just because
    it can authenticate without a key.
-   `chatgpt-web` is also explicit and catalog-only, but local: it requires the
-   separately installed codex-chatgpt-web launcher, an in-launcher ChatGPT
-   sign-in, its browser smoke test, and `bin/curate-models chatgpt-web`. Never
-   run that launcher's Install models action, because Codex Router alone owns
-   `openai_base_url`; leave the launcher running as the loopback browser
-   sidecar. It is Codex-only and must not be published into DSH or Gemini.
    `kimi-api` and `kimi-api-cn` are two different Moonshot platforms, not a
    fallback pair: the global console at platform.moonshot.ai and the mainland
    one at platform.moonshot.cn have separate accounts, separate billing, and
    keys that each host rejects from the other. Ask which platform the user's
    key came from rather than defaulting, and never copy a stored key between
    the two.
-5. For Kimi OAuth, reuse a valid `kimi login` session. If login is needed, run
+5. For Antigravity OAuth, use the router-managed browser sign-in and never
+   request or expose the Google access or refresh token. This integration uses
+   Google's internal Antigravity surface and Google AI Pro/Ultra entitlement;
+   it is not a Gemini API-key replacement guaranteed by a public Google API.
+   For Kimi OAuth, reuse a valid `kimi login` session. If login is needed, run
    the official CLI only in an interactive terminal. For API providers, invoke
    `bin/model-router codex provider-key PROVIDER set` in a PTY so the hidden
    prompt receives the value directly; do not relay it through chat. GitHub
    Copilot requires a fine-grained PAT with the Copilot Requests permission;
    never read or copy the official Copilot CLI credential store. Command
    Command Code is API-key-only: invoke `bin/model-router codex provider-key
-    commandcode set` in a PTY so the hidden prompt receives the value directly.
-   For Antigravity OAuth, never read or reuse the official `agy`/IDE credential
-   store and never use the vendor's OAuth client or identity. Require one
-   coherent operator-owned Google OAuth client ID and secret pair: the operator
-   must create a Google OAuth **Desktop app** client they own. **The Google
-   Cloud project behind that OAuth client must be allowlisted for
-   `cloudcode-pa.googleapis.com`, a private Google API.** Most projects are not
-   allowlisted, and operators cannot enable this API themselves: it requires
-   the producer-side `servicemanagement.services.bind` permission.
-   Run `bin/model-router codex providers login antigravity-oauth`; the router
-   first binds `127.0.0.1` on an OS-assigned port, then opens a loopback-only
-   setup page where the client ID and matching secret are submitted without
-   entering shell history. Open only the local URL through the OS browser
-   command and redirect to Google inside that listener, so neither client value
-   reaches argv or terminal logs. The coherent pair and resulting tokens are
-   stored together in the router's owner-only credential file and used for
-   refresh on macOS, Linux, and Windows; they never belong in a service
-   environment. Sign-in does not call the private Antigravity service or enable
-   the route. Run the explicitly quota-consuming
-   `providers probe antigravity-oauth --live --yes` next; add
-   `--provision-project` only when the operator separately authorizes creation
-   of a Google Cloud project. The live probe will fail with `SERVICE_DISABLED`
-   if the OAuth client's project is not allowlisted. Provisioning still
-   requires a successful, schema-valid bootstrap response that explicitly
-   advertises the selected tier; auth errors, server errors, malformed
-   responses, and missing tiers fail closed. The probe identifies itself
-   truthfully as Codex Router, and only a successful proof makes the provider
-   enableable. The Antigravity forwarder is not spawned or health-gated before
-   that proof, so an unused provider port cannot fail the whole router. A
-   passing probe records a generation-bound `pending_activation` that every
-   configured and publication reader rejects. Startup alone may boot its exact
-   pending proof; only after the whole local stack is healthy does it
-   atomically promote that generation active. A failed restart, an early
-   process death, a credential replacement, or a disconnect leaves it
-   nonpublishable. The probe restarts an installed service through that
-   sequence, and a foreground operator must restart that process before
-   enabling the provider. A v2 proof record with no activation metadata is not
-   grandfathered: it was written by the unsafe pre-readiness path and must pass
-   the explicit live probe again. If Google accepts only an impersonated vendor
-   client, leave it disabled. If the project is not allowlisted, this provider
-   cannot currently be used.
+   commandcode set` in a PTY so the hidden prompt receives the value directly.
    A key does not mean every account may use the Provider API: the Go plan is
    refused with "Your Go plan doesn't include API access". GOAT, Pro, Max, Team,
    and Provider plans do have API access and meter against their own credits.
@@ -238,110 +173,6 @@ file, never open its `settings.json` for writing, and leave the user's next
    authenticate — that is a one-time choice the CLI saves for itself, and the
    key it will use is this router's local caller capability, not a Google one.
 
-## Cursor outcome
-
-Publish every selected, credentialed routed model to Cursor Agent and Cursor
-App without exposing the main router capability, preserve unrelated Cursor
-settings, and leave Cursor stopped so the user can reopen it cleanly.
-
-## Cursor procedure
-
-1. Steps 1-6 of the Codex procedure apply, except that Cursor App and/or the
-   official `cursor-agent` binary replace Codex as the client prerequisite.
-2. Require an explicit stable public HTTPS origin for Cursor App. It must be a
-   user-owned named tunnel (or equivalent) forwarding only to
-   `127.0.0.1:4214`; never accept a temporary quick-tunnel URL and never point
-   it at the main router port. Do not create DNS, tunnel, or cloud credentials
-   without the user's authority.
-3. Fully quit Cursor before writing its settings database. Run
-   `./install.sh --target cursor --auto --providers IDS
-   --cursor-public-url https://HOST` on macOS/Linux or
-   `./install.ps1 -Target cursor -Auto -Providers IDS
-   -CursorPublicUrl https://HOST` on Windows. The manager refuses a live Cursor
-   process because the app can overwrite external SQLite changes on exit.
-4. Run `bin/model-router cursor doctor`. The Cursor app routing config, Agent
-   launcher, catalog freshness, caller capability, separate public-edge key,
-   service, router health, and selected credentials must be `OK`.
-5. Tell the user to run `cursor-router-agent` for Cursor Agent and to reopen
-   Cursor App and choose a `codex_router/readable_name__digest/effort` model.
-   The neutralized name avoids Cursor's built-in-substring BYOK rejection, and
-   the suffix is how the user changes effort because Cursor gives ordinary
-   user-added models no native parameter controls. The app override is global,
-   so they should turn it off before returning to Cursor-managed models.
-6. Cursor Agent text turns and its local read, shell, edit, and write loop are
-   supported. The adapter sends typed controlled-exec messages back to the
-   official client, which performs the operation under Cursor's own permission
-   mode, then returns the typed result before the model resumes. Never execute
-   those operations inside the router or bypass Cursor's permissions. Cursor
-   MCP tools use a separate exec shape and stay unadvertised until it has the
-   same official-client proof.
-
-## Claude Code outcome
-
-Publish every selected, credentialed routed model to Claude Code through a
-router-owned `claude-router` launcher, preserve Claude's settings and login,
-and keep every turn on the shared canonical Responses path.
-
-1. Require the official `claude` CLI. Never edit `~/.claude/settings.json`.
-2. Run `./install.sh --target claude --auto --providers IDS` on macOS/Linux or
-   `./install.ps1 -Target claude -Auto -Providers IDS` on Windows.
-3. The launcher supplies a secret-bearing loopback `ANTHROPIC_BASE_URL`,
-   `ANTHROPIC_AUTH_TOKEN`, and gateway model discovery only to its child
-   process. It must not persist those values into Claude-owned files.
-4. Model discovery publishes every routed slug as
-   `codex_router/anthropic/ROUTER_SLUG`. The `anthropic` segment is required:
-   Claude Code filters gateway-discovered ids that do not contain `claude` or
-   `anthropic`.
-5. The Anthropic Messages surface translates and re-enters `/v1/responses`; it
-   never reaches a provider directly. Tool use/results, images, token counting,
-   SSE pings, and the model list are part of the compatibility boundary.
-6. Run `bin/model-router claude doctor`. Routing config, launcher, catalog
-   freshness, caller capability, service, router health, and credentials must
-   be `OK`. Then tell the user to run `claude-router` and use `/model`.
-7. Anthropic officially supports Claude Code gateways for Claude models. Using
-   non-Claude models through this compatibility surface is functional but not
-   an Anthropic-supported product configuration; do not describe it otherwise.
-
-## OpenClaw outcome
-
-Install OpenClaw when it is missing, publish every selected and credentialed
-routed model under one router-owned `codex-router` provider, preserve all other
-OpenClaw configuration, and leave the next agent run to read the new route.
-
-1. OpenClaw's current releases require Node 22.22.3+, 24.15+, 25.9+, or 26+;
-   Node 23 is unsupported. The target installer must refuse an unsupported
-   runtime before invoking npm. With npm 11.16+ or 12+, install the official
-   package as `npm install -g openclaw@latest --allow-scripts=openclaw`; older
-   npm 11 releases omit the scoped lifecycle flag they do not understand.
-2. Run `./install.sh --target openclaw --auto --providers IDS` on macOS/Linux
-   or `./install.ps1 -Target openclaw -Auto -Providers IDS` on Windows. The
-   Control Center Harness action calls the same install-if-missing and publish
-   sequence. Do not start onboarding, a gateway, or an agent as a setup side
-   effect.
-3. Own exactly `models.providers.codex-router`. Write it through `openclaw
-   config patch --stdin --replace-path models.providers.codex-router`; never
-   put the caller capability in argv, logs, or status output. Refuse a
-   pre-existing provider with that id when no router publication marker proves
-   ownership, or when its base URL is not a managed loopback caller URL.
-4. Publish router slugs as `codex-router/SLUG` over `openai-responses`, with
-   each model's context window, input modalities, and exact supported reasoning
-   efforts. If no OpenClaw default exists on the first publish, set the
-   highest-priority route and record ownership. Preserve any existing default,
-   stop owning a default the user changes, and remove it on uninstall only
-   while it still equals the router-owned value.
-5. The caller URL and API key are local capabilities and make both the
-   OpenClaw config and `openclaw-models.json` private state. Caller-key rotation
-   must republish OpenClaw inside the same transaction as other credentialed
-   clients. Status, doctor, errors, and support material must redact the URL.
-6. Run `bin/model-router openclaw doctor`. OpenClaw routing config, CLI,
-   config privacy, catalog freshness, caller capability, service, router
-   health, and selected credentials must be `OK`.
-7. AgentHarnessV2 is OpenClaw's native runtime-plugin boundary, not another
-   HTTP provider protocol. A normal Responses endpoint belongs in the provider
-   catalog and uses OpenClaw's embedded runtime when no native plugin claims
-   it. Do not register a harness plugin or describe this integration as a
-   native V2 harness. No restart is needed; tell the user to run `openclaw`.
-
 ## What the Gemini integration writes, and what it must never touch
 
 Gemini CLI speaks only the Gemini API, so it is the one client that cannot be
@@ -387,8 +218,7 @@ translation layer and nothing else.
    proof. Relaying it upstream would put a router secret on a hop that can be
    substituted onto a provider — and leaving the header off is also what makes
    `callerBroughtNoUpstreamCredential` true, which is how a client with no
-   ChatGPT session of its own reaches native models after the user explicitly
-   authorizes the shared router plane once.
+   ChatGPT session of its own reaches native models.
 7. **The default model is written, and that is deliberate.** Gemini CLI's own
    default is `gemini-2.5-pro`, which this router does not route, so an install
    that left it alone would 404 on the user's first turn. `GEMINI_MODEL`
@@ -397,11 +227,10 @@ translation layer and nothing else.
    integration deliberately departs from the harness's opt-in rule, because
    there the default is a convenience and here it is the difference between a
    working install and a broken one.
-8. **`embedContent` is refused, not faked.** The separate OpenAI-compatible
-   `/v1/embeddings` surface is model-gated and is not a Gemini translation
-   contract. Gemini CLI calls `embedContent` only from `baseLlmClient`, never
-   from the turn loop, so a named 501 is the honest answer and a fabricated
-   vector would be the dishonest one.
+8. **`embedContent` is refused, not faked.** No routed provider exposes an
+   embedding endpoint through this router. Gemini CLI calls it only from
+   `baseLlmClient`, never from the turn loop, so a named 501 is the honest
+   answer and a fabricated vector would be the dishonest one.
 9. **`countTokens` is estimated.** There is no upstream to ask, and spending a
    real turn to answer a count would bill the user for a question they asked for
    free. A client that gets no number cannot decide whether to compact, so the
@@ -447,19 +276,6 @@ beside ours, so everything else in them is somebody else's work.
    lines. `test/dsh-config-manager.test.mjs` asserts both properties against a
    document that has work of somebody else's in every position the router
    writes near; do not weaken them.
-   The credentials document comes in two shapes: current harness builds wrap
-   the reference map in a `version`/`refs` envelope, older ones kept it at the
-   document root. Both are written in place and neither is converted into the
-   other, because the shape belongs to the harness build that reads the file.
-   `refs` present settles it; `version` without `refs` settles it the other
-   way, since that is a current harness on its first install — the case where
-   guessing wrong is silent, because the harness resolves `apiKeyEnv` under
-   `refs` and a key one level too high 401s with no diagnostic. `status()`
-   resolves the credential through that same decision, so it can never report
-   one the harness cannot read, and a new reference takes its indentation from
-   a sibling rather than from the `refs:` key's own column — a mixed-indent
-   block is not YAML any parser reads back, and this file holds every adapter's
-   key.
 2. **Refuse rather than guess.** `src/yaml-structure.mjs` is a fail-closed
    structural lexer for block-mapping YAML, not a general YAML parser. A
    document it cannot read plainly — a tab indent, a multi-document stream, a
@@ -473,18 +289,16 @@ beside ours, so everything else in them is somebody else's work.
    the same bound the harness itself holds them to, and status output reports
    the redacted URL exactly as the Codex manager does. Never print the complete
    managed base URL.
-4. **Routed models are always published; native ones require authorization and
-   a session.** Publish only the selected, credentialed, listed, non-hidden routed
+4. **Routed models are always published; native ones only while a session backs
+   them.** Publish only the selected, credentialed, listed, non-hidden routed
    models. An unregistered slug on the router's `/v1/responses` endpoint is
    treated as native GPT traffic needing a ChatGPT session, which a harness
-   request does not carry — so a native model is advertised only while the user
-   has explicitly authorized this shared local router plane and
+   request does not carry — so a native model is advertised only while
    `nativeSessionStatus().usable` reports the session this machine is signed in
-   with as spendable. `nativeSessionAvailable()` is the combined gate. Missing
-   consent, an unreadable consent marker, sign-out, or expiry withholds the model.
-   Publishing one the router cannot authorize offers a turn that 401s, which is
-   the failure this gate exists to prevent; never widen it to presence alone,
-   because an expired session is present.
+   with as spendable, and is withheld again the moment it is not. Publishing one
+   the router cannot authorize offers a turn that 401s, which is the failure
+   this gate exists to prevent; never widen it to presence alone, because an
+   expired session is present.
    The vision-bridge engine candidates still exclude native models: that call
    site admits an engine on evidence the *caller's* session can spend it, and a
    substituted session is not the caller's.
@@ -590,52 +404,6 @@ dependency tree. That tree is pinned and hashed rather than re-resolved.
    meaningless. Do not add a resolver cache there; a cache hit can serve an
    already-unpacked wheel and skip the hash check the job exists to perform.
 
-## `stop` and `start` act on the same layer, and the proxy survives either
-
-`bin/stop` unloads the background service. `bin/start` used to exec the
-supervisor in the foreground instead, so the obvious `stop; start` pair was
-asymmetric: it retired the managed service and left an unmanaged copy in its
-place. The copy carried the calling shell's environment rather than the
-installed one and died with the shell that started it.
-
-That is how a live installation lost its proxy. A `stop; start` issued from a
-`zsh -lc` that a desktop app had spawned produced a router with no
-`HTTP_PROXY` and no `NODE_USE_ENV_PROXY`, because the shell had neither. Every
-upstream was dialled directly, chatgpt.com timed out, and the router answered
-502 with the message from `src/transport-failure.mjs` telling the operator to
-set an opt-in that was already set -- in the LaunchAgent it had just unloaded.
-The service definition still looked correct at every glance.
-
-1. **Both verbs go through `src/service.mjs`.** `bin/start`, Windows
-   `codex-router.ps1 start`, and their corresponding stop paths manage the same
-   background-service layer. Never add a lifecycle verb that manages the service
-   on one side and bypasses it on the other.
-2. **The foreground supervisor stays reachable, never by accident.**
-   `bin/start --foreground` and `codex-router.ps1 start --foreground` are the
-   explicit debugging paths. They enter through `src/foreground-start.mjs`,
-   which holds the shared service-operation lock for the supervisor's lifetime.
-   That keeps caller-capability rotation/recovery from swapping generations
-   underneath an unmanaged foreground router. Direct `src/start.mjs` remains the
-   OS-service payload; do not route the managed service through the lifetime lock.
-3. **A silent environment adopts the recorded proxy.**
-   `inheritedProxyEnvironment()` in `src/proxy-environment.mjs` reads the
-   install manifest, and `src/start.mjs` applies it to `process.env` before it
-   reads anything or spawns a child, so the router and all three forwarders
-   inherit it. This is the belt to the service definition's braces: it makes
-   the foreground path, and any future path that execs the supervisor directly,
-   reach upstreams exactly as the managed one does.
-4. **Silence is the only trigger.** `proxyEnvironmentDeclared` already treats a
-   named proxy -- or any `NODE_USE_ENV_PROXY`, `0` included -- as the operator
-   speaking, and the restore defers to it. A deliberate unproxied run stays
-   unproxied. Do not widen the trigger to "no proxy reachable" or similar
-   inference; the manifest records a decision, not a guess.
-5. **Coverage.** `test/proxy-environment.test.mjs` holds the restore contract
-   and `test/service-lifecycle.test.mjs` holds the dispatch/ownership boundary:
-   normal start reaches the managed service layer, Windows matches POSIX, and
-   explicit foreground startup cannot boot while another service lifecycle
-   operation owns the shared lock. The same file keeps the silent-environment
-   proxy restore regression.
-
 ## The gateway is restarted in place; the router is not taken down with it
 
 `src/gateway-supervisor.mjs` watches the LiteLLM child and replaces it when it
@@ -719,19 +487,7 @@ and every client saw a bare "Connection error" naming nothing.
    live probe is the regression oracle: no `OutputTextDelta without active
    item` warnings and the message occupies the next output index after
    reasoning.
-10. **LiteLLM custom-tool streaming uses a mixed lifecycle.** LiteLLM 1.96
-   converts Responses `type: "custom"` tools into Chat Completions functions
-   whose one required string property is `content`. On the return stream it can
-   already restore `response.output_item.added` / `done` as native
-   `custom_tool_call` items while still emitting legacy
-   `response.function_call_arguments.delta` / `done` events whose JSON wrapper
-   is `{ "content": "..." }`. `NamespaceToolCallTransform` may decode that
-   wrapper only when the source opening itself was already a native custom call;
-   the router's own custom-function bridge keeps its `{ "input": "..." }`
-   contract. Keep the streamed-input fingerprint check and fail closed when the
-   delta, terminal arguments, or output-item close disagree. The focused
-   namespace-relay test and Z.ai router fixture hold both sides of this boundary.
-11. **Do not answer a gateway crash by moving the litellm pin.** The pin is a
+10. **Do not answer a gateway crash by moving the litellm pin.** The pin is a
    security floor and a wheel-availability decision (see the lock section
    above), any change to it has to be proven by booting the proxy rather than by
    a successful resolve, and a router that survives its gateway is worth having
@@ -785,18 +541,7 @@ to ship tested support to every installer.
    advertises for that model (`modelContextLengths` in
    `src/model-discovery.mjs`), because `autoCompact` is derived from it and an
    understated window makes Codex compact a session that had the room. Only a
-   model the catalog sizes in silence falls back to 131072.
-   OpenCode Zen's anonymous catalog publishes ids and nothing else, so its free
-   models are sized and laddered from `src/opencode-curation.mjs`, which
-   records OpenCode's own published `limit` and `reasoning_options` for each
-   *free id* along with the sourcing. A documented window is stored only when
-   the 0.85 auto-compact ratio still reserves that id's published
-   `limit.output`; otherwise the id keeps 131072 and its description says the
-   window is unknown, because a window a full-length completion can overrun
-   fails the turn outright. An id OpenCode documents nothing usable for keeps
-   the stock "conservative default metadata" description, which is how a
-   stored entry says every value in it is a default rather than an advertised
-   capability. An explicit `--efforts` always wins over a documented ladder. An entry curated
+   model the catalog sizes in silence falls back to 131072. An entry curated
    before this landed keeps its stored window — an additive run never rewrites
    existing metadata — so repair it by editing `user-models.json` or by
    `--remove`-ing and re-curating the model. An optional `availabilityNux` string on a model becomes
@@ -829,40 +574,82 @@ can hold the v2 child role is the router's. The same model answers differently
 per provider — tool support, request profiles, and payload handling all vary —
 so the unit of evidence is always the slug, never the model name.
 
-1. Enabling an unknown model hands it to a detached compatibility probe
+1. Enabling a non-registry-v2 model hands it to a detached capability probe
    (`src/subagent-verify.mjs`): two live requests through the installed router
    proving streaming and a forced tool call. The proofs snapshot shows
-   `checking` until the verdict lands. A passing probe records `candidate`; it
-   does **not** advertise v2. A worker that dies without a verdict records a
-   failure, and a stale `checking` record is retryable. Explicit registry-v1
-   routes are settled decisions and are never re-opened by this local probe;
-   registry-v2 routes need no compatibility probe.
-2. `multi-agent-proofs.json` is diagnostic application evidence only. Local
-   `candidate`, and legacy `experimental` / `proven`, records cannot change the
-   catalog's `multi_agent_version`, managed agent definitions, or any client
-   route. `applySubagentProofs` deliberately returns the registry capabilities
-   unchanged. An unreadable proofs file therefore authorizes and promotes
-   nothing.
-3. The compatibility probe is not the native collaboration proof. It does not
-   exercise Codex's encrypted child payload relay, a marker-return spawn, or a
-   same-thread follow-up. A successful ordinary chat/tool request must never be
-   presented as evidence that the model can hold the native v2 child role.
-4. Only the exact checked-in registry route may assert v2. The route's slug,
-   provider, and upstream model must match an accepted artifact under
-   `v2_agent/`, and the accepted artifact and `multiAgentVersion: "v2"` change
-   land in the same pull request. CI enforces the implication in both
-   directions for every post-workflow promotion. Six exact Kimi/Grok route
-   identities certified before the artifact gate are grandfathered; changing
-   any part of one identity loses that exception.
-5. `control subagents verify [SLUG ...]` re-researches explicitly (foreground,
-   about two requests per unknown candidate); with no slugs it sweeps the
-   enabled list. Select-all and mode changes never trigger probes. Provider,
-   model, and family auto-policies are explicit standing consent for matching
-   newly configured unknown routes; they still produce only candidates.
-6. Machine-local evidence is exactly that. Never edit checked-in `config/`
-   because one machine's probe passed. Complete the redacted application,
-   reproduce the two native child checks with a spendable account, and review
-   the exact provider route before shipping a v2 claim to every installer.
+   `checking` until the verdict lands and the catalog republishes. A worker
+   that dies without a verdict marks its slugs `failed` on the way out, and a
+   `checking` older than the probe ceiling is treated as abandoned — so
+   switching a wedged model off and on always re-researches it.
+2. A passing model is advertised to Codex as an **experimental** v2 subagent,
+   recorded in the protected `multi-agent-proofs.json`. The first real child
+   turn settles it: Codex marks child turns with `x-openai-subagent`, and the
+   router's own request path records a clean completion as the durable proof
+   (`proven`) or a structural rejection — HTTP 400/422 — as a demotion back to
+   v1 with the reason kept where it was switched on. Transient failures (429,
+   5xx, disconnects) prove nothing and leave the window open.
+3. `proven` is a claim about the wire, not about the work. It says one child
+   turn for that slug completed cleanly, so the model can hold the child role;
+   it does not say the child finished what it was delegated. The router
+   observes HTTP turns, not agent lifecycles — a child makes one turn per
+   tool-call round trip, and the loop that strings them together is Codex's.
+   Do not write copy anywhere (log lines, tray, docs) that reads `proven` as
+   "the delegated task succeeded".
+4. **`proven` is revocable, and only downward automatically** (issue #257).
+   Promotion is a one-time event, but the window in which machine-local
+   evidence can be taken away stays open for as long as that evidence is what
+   the v2 advertisement rests on. A 400/422 on any child turn demotes the slug,
+   before or after promotion and without needing to repeat: it is the same
+   structural refusal the capability probe treats as disqualifying, the
+   transient statuses that prove nothing are already excluded, and the
+   alternative is letting the oldest observation beat the newest. A registry-v2
+   model is untouched — its claim is the shipped native collaboration proof,
+   not this machine's traffic. Re-promotion is never automatic: it costs live
+   requests, so it happens only through `control subagents verify` or switching
+   the model off and on.
+5. **A looping child is demoted against its own compaction budget**, because a
+   child that answers forever emits nothing but 200s and no status-shaped
+   branch can ever see it. `src/subagent-turns.mjs` accounts each spawn
+   separately, keyed on the `thread-id` header, and adds up the *new* input
+   tokens it produces (every child turn resends the whole conversation, so the
+   growth in the prompt count is what the child newly made; a compaction makes
+   the count fall and everything after the fall is work being done twice). The
+   ceiling is twice the larger of the model's declared `autoCompact` budget and
+   the largest prompt this spawn has actually had accepted. Nothing there is
+   invented: `autoCompact` is per model and comes from the provider's published
+   window, and the multiple comes from the pathology
+   `src/context-window-drift.mjs` already names — one budget is a large but
+   legitimate task, it is *compacting again without ever finishing* that is the
+   runaway. Measuring against the observed peak as well as the declaration is
+   what makes a false demotion impossible rather than merely unlikely: an
+   uncompacted spawn's total is exactly half its own ceiling however long its
+   task runs, which matters because the registry validator permits any
+   `1 <= autoCompact <= contextWindow` and one oversized tool result can carry a
+   single turn past the compaction limit in one step. A child thread reused for
+   a `FOLLOWUP_TASK` is deliberately one spawn here — its context really does
+   carry across — and an idle one expires rather than accumulating forever.
+   No positive "terminal turn" detector is needed or possible: the
+   turn that ended a spawn is only knowable by no further turn arriving, and a
+   ceiling can only ever be crossed by a spawn that is still producing turns.
+   Only a prompt count the provider actually reported may move the total —
+   substituted estimates and retry-doubled counts are refused here for exactly
+   the reasons `context-window-drift.mjs` refuses them as capacity evidence. A
+   model that declares no `autoCompact` has no derived ceiling and is counted
+   but never condemned; do not give it one by guessing. Both demotion paths log
+   unconditionally and record the turn and token counts in the proofs file, so
+   `control subagents status` and the tray can say what happened.
+6. Local settings still never manufacture a v2 claim. The only writers of
+   promotion evidence are the probe worker and the router's observation of
+   real traffic; an unreadable proofs file promotes nothing, and a hidden or
+   switched-off slug stays v1 whatever evidence it carries.
+7. `control subagents verify [SLUG ...]` re-researches explicitly (foreground,
+   ~2 requests per candidate); with no slugs it sweeps the enabled list.
+   Select-all and mode changes never trigger probes — a sweep across every
+   provider is quota the operator must ask for.
+8. Machine-local proofs are exactly that. Shipping a default to every
+   installer still requires the full native collaboration proof and a registry
+   change (below); never edit the checked-in `config/` tree because one
+   machine's probe passed.
 
 ### Ship a model to every installer
 
@@ -903,31 +690,10 @@ so the unit of evidence is always the slug, never the model name.
    Codex collaboration: tool calls work, encrypted subagent payload relay works
    without disclosure, a marker-return spawn succeeds, and a same-thread
    follow-up succeeds. Otherwise omit it and retain conservative v1 behavior.
-   The registry is not the only way a route reaches v2. The operator's own
-   selection promotes it — `subagents mode selected` plus `subagents set <slug>
-   on`, or `mode all` — and so does a completed local verification of all five
-   checks recorded in `multi-agent-proofs.json`. Selection is the ordinary path
-   and the one the Control Center switch uses; the registry exists so nobody
-   has to select a proven route by hand. None of this loosens the gate: an
-   explicit `off` beats every mode, a hidden model is never promoted, a partial
-   verification or a mismatched slug promotes nothing, the legacy diagnostic
-   statuses promote nothing, and only the pull request that moves the registry
-   entry may accept a `v2_agent/` application. Read
-   `docs/SUBAGENT-CERTIFICATION.md` in full before changing
-   `src/subagent-*.mjs`, `src/multi-agent-state.mjs`, `v2_agent/`, or the
-   Subagents column — it records which questions have already been answered at
-   the cost of provider quota.
 5. Remember that Codex advertises only a small priority-ordered subset of native
    spawn-model overrides. Adjust priority intentionally and keep the desired
    Kimi/Grok/GPT choices in that visible subset; do not crowd them out
-   accidentally when adding a model. The published catalog carries two
-   numberings for exactly this reason (`publishedPickerPriorities` in
-   `src/catalog.mjs`): a certified v2 route keeps its authored priority so it
-   stays inside that window, while every v1 routed model is published in a
-   band above the highest visible native priority so the picker shows vendor
-   groups instead of interleaving routed entries among native GPT models
-   (issue #544). Only the published entry is renumbered; failover, the vision
-   bridge, and the other clients keep reading the registry value.
+   accidentally when adding a model.
 6. Add registry, catalog, routing/request-profile, and failure-path regression
    tests. Run `npm run check` and `npm test`. With explicit quota approval, run
    `./bin/test-model 'provider/model' --live --yes`, reinstall, fully restart
@@ -1325,80 +1091,8 @@ in `src/model-registry.mjs`, never by the registry fragment alone, and the
 `ANONYMOUS_ENDPOINTS` table beside it is the reason a fragment edit cannot
 point a credential-free provider at a model somebody would be billed for.
 `opencode-free` and `kilo-free` each expose a large free subset picked out by a
-naming rule that changes without notice, so neither ships that subset: discovery
+naming rule that changes without notice, so both stay catalog-only: discovery
 filters the provider's live `/models` response and the user curates locally.
-
-## Ox Alpha became GLM-5.3-Flash on OpenCode Go
-
-Z.ai revealed the OpenCode Go Ox Alpha preview as GLM-5.3-Flash. OpenCode Go
-withdrew `ox-alpha-free` and now publishes `glm-5.3-flash` on Chat Completions.
-The checked-in route is `opencode-go/glm-5.3-flash`; the old public slug
-`opencode-go/ox-alpha` is a static migration alias so existing picker state and
-callers move to the live route instead of reaching a withdrawn upstream ID. The
-older curation slug `opencode-go/ox-alpha-free` is an alias to the same target.
-OpenCode Go publishes a 1,000,000-token context and 131,072-token output limit
-for the named route. Store the provider limit rather than the base model's
-1,048,576 architectural maximum. The ordinary 0.85 compaction ratio is not
-safe for this route in Codex: large live multimodal histories repeatedly
-returned empty completions before that point. Compact conservatively at 400,000
-while retaining the provider's advertised context as catalog metadata. This
-does not bypass provider moderation; a rejected remote compaction remains a
-provider limitation, not a router or stream crash.
-
-No checked-in route preserves the preview under the Ox Alpha name. OpenCode
-Free, OpenRouter, and Nous Research withdrew their preview ids. Direct
-exact-route probes then rejected `stealth/ox-alpha` on Command Code as
-`model_unavailable` on basic, streaming, forced-tool, stateless tool-result,
-and compact requests. The available Venice account returned its HTTP 402
-billing gate on all five surfaces before `stealth-ox-alpha` could be
-wire-certified. Exact probes disable cooldown, response-verdict, and compaction
-failover, so neither result can be a healthy alternate answering in disguise.
-The repository therefore ships neither preset.
-
-Command Code and Venice discovery still preserve the provider catalog for
-explicit operator curation. That is not compatibility certification: a local
-entry can fail when the catalog is stale or the account cannot reach inference.
-In particular, Venice curation retains the provider-advertised effort metadata;
-the repository does not replace it with a cross-provider inference for a route
-it could not execute.
-
-The named GLM-5.3-Flash routes on OpenCode Go, OpenRouter, Z.ai API, and Z.ai
-Coding did pass direct basic, streaming, forced-tool, stateless tool-result,
-and compact probes. Their recorded effort ladder is `low`/`high`/`max`, and it is the
-**model's** ladder rather than a generic reseller default. The model always
-thinks, and its upstream refuses an off-ladder rung by name:
-
-```
-HTTP 400 — [1210] This model always engages in thinking and cannot be
-disabled; please use low, high, or max
-```
-
-The ladder also collides with the effort clamp in `src/catalog.mjs`. Codex
-gained the `max` variant in 0.143.0, so on anything older the catalog rewrites
-this model's default down to `xhigh` — a rung every route refuses. The
-legacy-named `ox-alpha` request profile in `src/api-forwarder.mjs` closes that
-loop for the OpenCode Go and OpenRouter named routes: it clamps whatever Codex
-sent onto the rungs the registry entry declares, so `xhigh` and `ultra` land on
-`max`, while `medium` and `minimal` land on `low`. An absent effort stays absent
-so the upstream default applies, and undocumented `thinking` is stripped. Z.ai
-Coding uses its own `glm-thinking` profile. These named routes advertise a
-1,000,000-token window, compact at the directly proved conservative 400,000
-threshold, and preserve forced `tool_choice: "required"`.
-
-`ollama-cloud/glm-5.3-flash` is checked in as candidate registry metadata with a
-model-scoped request profile that clamps both flat and nested reasoning effort
-onto the same `low`/`high`/`max` ladder. It must not be called certified until
-the public slug passes the router-level exact-route suite for basic, streaming,
-forced-tool, stateless tool-result, and compact requests with failover disabled.
-
-`ollama-cloud/glm-5.3` is also checked in as candidate registry metadata on the
-same low/high/max ladder and the sibling `ollama-cloud-glm-5-3` clamp profile,
-advertising 1,000,000 context and an 880,000 conservative compact threshold
-matching the existing Ollama Cloud GLM-5.2 policy. It requires its own run of
-the router-level exact-route suite before it is called certified. That
-threshold is not a provider-measured boundary. It is text-only: GLM-5.3's
-multimodal variant is GLM-5.3-Flash, so the full-size route declares `text`
-modality instead of inheriting Flash's image path.
 
 ## A provider whose models each name their own endpoint
 
@@ -1446,43 +1140,42 @@ of them, because two answers to "where does this go" have a silent winner.
    defaults `curate-models` would guess. An anonymous endpoint answers without a
    credential, so there is no excuse for inferring any of it.
 
-## Cursor target
+## Cursor was measured and rejected
 
-Cursor is a client target, not a provider. The implementation was measured
-against Cursor Agent `2026.08.25-3e8eec8` and Cursor App `3.16.17`.
+Both halves of "can we use Cursor?" were built, measured against a signed-in
+account, and answered no. The working implementation is on the closed PR #279
+and the `feat/cursor-cli-provider-main` branch; this section is the result, so
+nobody starts over from the question.
 
-1. **Cursor Agent speaks Connect/protobuf.** `CURSOR_API_ENDPOINT` points the
-   official binary at the router's caller-capability root. The adapter serves
-   auth exchange, live routed model catalog/default, `RunSSE`, and
-   `BidiAppend`, then re-enters `/v1/responses`. `cursor-router-agent` is the
-   installed launcher and keeps the capability out of command arguments.
-2. **CLI tool execution stays in Cursor.** The adapter maps read, bash, edit,
-   and write calls onto Cursor's typed controlled-exec protocol, waits for the
-   client's result, and resumes the model with that result. Cursor therefore
-   remains the process that applies its permission mode and touches the local
-   workspace; the router never executes a model-requested command or file
-   mutation itself. The protocol is covered by wire-level tests and a live
-   official-CLI proof. MCP declarations are not advertised because their
-   separate exec shape has not received the same proof.
-3. **Retail Cursor App is server-mediated.** A loopback base URL is refused as
-   private-network access. `--target cursor` therefore requires a stable public
-   HTTPS origin whose tunnel forwards only to `127.0.0.1:4214`. The separate
-   edge accepts only secret-bearing `/v1/models` and `/v1/chat/completions`,
-   translates both Chat Completions and Responses-shaped bodies, and re-enters
-   the canonical router path. The main router port stays loopback-only.
-4. **Cursor's override is global.** Enabling it can also send Cursor-managed
-   model slugs to the custom edge. Routed models use collision-safe
-   `codex_router/readable_name__digest/effort` aliases because Cursor rejects a
-   custom BYOK id containing a built-in model id before it reaches the edge.
-   Cursor gives user-added models no stable native parameter metadata, so each
-   supported reasoning effort is a separate picker row and the edge restores
-   it as `reasoning.effort`. Turn the override off when returning to
-   Cursor-managed models.
-5. **Cursor must be stopped for settings writes.** The manager transactionally
-   updates the application-user JSON in `state.vscdb`, preserves unrelated
-   state, records its owned aliases, and reverses only its own changes. A live
-   Cursor process may overwrite an external transaction on exit, so publish,
-   republish, repair, and uninstall refuse while it is running.
+1. **Cursor CLI cannot be a target.** `cursor-agent` has no BYOK and no custom
+   base URL: its `~/.cursor/cli-config.json` reference carries `model`,
+   `permissions`, `sandbox`, and display keys and nothing naming an endpoint.
+   `--endpoint` exists but speaks Cursor's own protocol rather than anything
+   OpenAI-shaped, and Bedrock mode validates the credential against Cursor's
+   backend. The IDE's "Override OpenAI Base URL" is IDE-only and refuses
+   private-network addresses besides. There is no arrangement in which
+   cursor-agent sends traffic to this router.
+2. **As a provider it costs ~22,150 prompt tokens per turn, fixed.**
+   `cursor-agent` is an agent, not an inference endpoint: it prepends its own
+   harness to everything. Two live turns, one asking ~20 tokens and one ~12,
+   billed 22,166 and 22,162 input tokens. The same question to any ordinary
+   provider bills about 20. On a plan denominated in credits tied to API cost
+   that is roughly a thousandfold markup on short prompts, and it does not
+   amortize away until prompts are themselves enormous.
+3. **The flags that would strip that harness are server-gated.** Both exist in
+   the CLI and both are refused by Cursor's backend, not by argument parsing:
+   `--exclude-workspace-context` answers `[invalid_argument] Workspace context
+   exclusion is not allowed for this user, team, or selected model`, and
+   `--system-prompt <file>` answers `[invalid_argument] unknown option
+   '--system-prompt'`. Do not re-test these hoping for a different answer; test
+   whether Cursor has ungated them, which is a different question.
+4. **`cursor-agent` never emits OpenAI `tool_calls`.** It returns prose and its
+   own tool events. Codex dispatches every turn through tool calls, so a Cursor
+   model could not drive one at any price. Cost aside, this alone disqualifies
+   it from the job the router exists to do.
+
+Reopen the question only if Cursor publishes a raw inference endpoint or
+ungates the harness flags. Anything else is the same measurement again.
 
 Three findings from that work generalize to any CLI-backed provider, and cost
 real debugging to obtain:
@@ -1538,33 +1231,6 @@ minutes later. Do not quietly drop the label because a check happened to pass.
    the registry and gateway config load at startup. If the router starts
    answering every request with `local_router_error`, suspect a process still
    holding pre-change state rather than the new code.
-
-## Embeddings are a separate, explicitly gated route
-
-1. **A model grants the capability, never a provider name.** `/v1/embeddings`
-   accepts only a registered routed model whose `supportedEndpoints` includes
-   `/embeddings`. Discovery metadata is untrusted and cannot add that field.
-2. **Endpoint-only models are not chat models.** A model that omits its
-   provider's conversational endpoint must be `listed: false`; otherwise the
-   registry refuses it before the Codex picker can advertise a broken turn.
-3. **No chat adapter and no LiteLLM hop.** The router rewrites the public slug
-   to the gateway id and calls the internal API forwarder. The forwarder
-   rewrites only that id to the upstream model and preserves the remaining
-   embeddings JSON. Do not normalize the body as Chat Completions or Responses.
-4. **The caller secret never leaves loopback.** Query parameters on the
-   capability URL are dropped, only a bounded request id may cross the internal
-   hop, and the API forwarder replaces internal auth with the provider's own
-   credential inside its established boundary. Both the router-to-forwarder
-   and forwarder-to-provider hops refuse redirects so a 307/308 cannot replay
-   the POST body onto another destination.
-5. **Bound and cancel both directions; never retry.** The public request and
-   provider response default to 8 MiB limits, and client cancellation aborts
-   both hops. A transport failure may occur after the provider billed the
-   input, so automatic replay is not safe without provider-specific evidence.
-6. **Every future endpoint is a new protocol review.** This slice does not
-   authorize completions, moderation, media, files, or batches. Each needs its
-   own capability, wire contract, limits, cancellation, idempotency, and
-   retry/stream-commit evidence.
 
 ## The Devin CLI provider is unverified, and says so
 
@@ -1646,9 +1312,11 @@ about it.
 - Preserve reasoning settings, profiles, projects, trust, MCP configuration,
   features, and ChatGPT authentication. Preserve `model` and `model_provider`
   outside the explicitly enabled login-free mode.
-- A user-initiated macOS tray login-mode change may gracefully restart only the
-  registered Codex desktop app. This does not authorize an installation task to
-  quit Codex, and the tray must never force-terminate it.
+- A user-initiated tray login change may stop and relaunch only the verified
+  Codex desktop app. On Linux that means a root-owned, non-writable approved
+  executable whose PID, start identity, and executable path still match at the
+  moment the cooperative `SIGTERM` request is sent. This does not authorize an
+  installation task to quit Codex, and the tray must never force-terminate it.
 - Do not kill unknown processes on ports 4200-4203, or on the Grok OAuth
   forwarder port 4208. The previous 4100-4103/4108 defaults remain valid only
   when explicitly supplied through the port environment variables.
@@ -1825,16 +1493,7 @@ purpose; several of them exist because the obvious wider version is wrong.
    `canonicalProviderId`: protocol variants share one credential and therefore
    one quota, so a sibling is guaranteed to fail the same way.
 5. **A cooldown is only ever a window the provider itself named.** Derived from
-   `Retry-After`, `cooldownUntil`, or a wall-clock reset the provider stated in
-   its own refusal body — Z.ai's Coding Plan sends "Your limit will reset at
-   2026-09-01 21:32:15" and no header, and without reading it an exhausted plan
-   is re-attempted once per turn for the whole window. A bare stamp carries no
-   zone, so it is resolved to the **earliest** instant any real UTC offset
-   allows that has not already passed, and ignored outright when no offset can
-   place it ahead. Waking early costs one refusal; waking late withholds a model
-   the operator is paying for, and reading a zoneless stamp as local time does
-   exactly that for anyone whose clock does not match the plan's. Never
-   invented, capped at six hours, and
+   `Retry-After` and `cooldownUntil`, never invented, capped at six hours, and
    cleared on that provider's next successful answer. A provider under cooldown
    is skipped before dispatch, which is the entire saving — so a cooldown that
    is wrong strands the operator's chosen model, and that is why nothing may
@@ -2001,13 +1660,13 @@ purpose.
 - A test that isolates the state directory must isolate `CODEX_HOME` with it.
   `MODEL_ROUTER_STATE_DIR` and `CODEX_ROUTER_STATE_DIR` do not redirect
   `CODEX_AGENTS_DIR`, which is `$CODEX_HOME/agents`, and `src/catalog.mjs`
-  prunes that directory to the exact registry-v2 routes the state it just read
-  leaves enabled and visible.
+  prunes that directory to whatever the state it just read promotes to `v2`.
   Point the state at a scratch directory while inheriting the real home and the
   run deletes the operator's own routed agent definitions — every model
-  selected in the real state can disappear from that scratch publication —
-  while `multi-agent-settings.json` and `multi-agent-proofs.json` live in the
-  scratch state. The operator sees subagents reset after an unrelated command.
+  promoted by a local capability proof rather than by the shipped registry —
+  while `multi-agent-settings.json` and `multi-agent-proofs.json`, which live in
+  the scratch state, survive intact to report the models as still enabled. The
+  operator sees subagents that reset themselves after an unrelated command.
   `test/state-owner.test.mjs` pins this: no test file may spawn the catalog
   without setting `CODEX_HOME`.
 
@@ -2039,12 +1698,10 @@ user has to find in the docs, so `src/dsh-install.mjs` owns the other half.
   get right — the PATH a spawn inherits, where npm drops binaries per platform,
   which line of npm's output is worth showing — are exactly what drifts.
 - Native GPT models are published only while `codex-native-session.mjs` reports
-  both explicit shared-plane authorization and a usable session: they need a
-  ChatGPT session, and a harness request carries none of its own. One
-  `chatgpt-session enable` applies to every local client for this OS user; they
-  are withheld again the moment authorization is revoked or the session is
-  missing or expired. The count the button reports is the routable set, not the
-  picker.
+  a usable session: they need a ChatGPT session, a harness request carries none
+  of its own, and the fallback spends the one this machine is already signed in
+  with. They are withheld again the moment it is missing or expired. The count
+  the button reports is the routable set, not the picker.
 
 `src/dsh-web.mjs` starts and finds the browser UI, so the tray's button can be
 `Open site` once there is a site to open.
@@ -2098,18 +1755,9 @@ attaches both. A harness turn attaches neither, so native models advertised to
 it were models it could never spend.
 
 `src/codex-native-session.mjs` closes that by falling back to the session this
-machine is already signed in with, in `$CODEX_HOME/auth.json`, only after the
-user authorizes that use once. `native-session-consent.json` is an owner-only
-marker carrying no credential and belongs to the shared router plane: asking
-the same OS user to sign in or authorize once per harness buys nothing.
-
-- **Consent fails closed.** A missing, malformed, or unrecognized marker means
-  off. `chatgpt-session enable` refuses until `codex login` has produced a
-  usable session, then republishes every installed client; `disable` removes
-  the marker and republishes them again without signing Codex out. The
-  `CODEX_ROUTER_NATIVE_SESSION_FALLBACK=1` environment override is the explicit
-  headless opt-in, while `0` is an emergency off switch. No other value is
-  consent.
+machine is already signed in with, in `$CODEX_HOME/auth.json`. The user is
+signed in to Codex here; asking them to sign in again for a client running as
+the same user on the same machine buys nothing.
 
 - **Fallback, never override.** Injection happens only when the request carried
   no *upstream* credential. Codex always carries one, so a Codex turn is
@@ -2143,11 +1791,10 @@ the same OS user to sign in or authorize once per harness buys nothing.
   a status call, and not put in an error message. `nativeSessionStatus()` reports
   presence, usability, and age — `test/codex-native-session.test.mjs` asserts the
   serialized status contains neither the token nor the account id.
-- **It widens the caller key.** With sharing authorized, anything holding that
-  local key spends the ChatGPT subscription and not only the API-key providers.
-  That is a deliberate, user-made tradeoff recorded once for the shared plane;
-  `chatgpt-session disable` revokes it everywhere and the clients silently drop
-  back to routed models only.
+- **It widens the caller key.** With the fallback on, anything holding that key
+  spends the ChatGPT subscription and not only the API-key providers. That is a
+  deliberate, user-made tradeoff; `CODEX_ROUTER_NATIVE_SESSION_FALLBACK=0` turns
+  it off and the harness silently drops back to routed models only.
 - **The access token lives about ten days, and Codex renews it only when Codex
   is used.** A harness-only stretch longer than that would otherwise leave the
   router sending a dead token. `nativeSessionHeaders()` reads the `exp` claim

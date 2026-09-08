@@ -118,41 +118,14 @@ export function providerOnboardingSnapshot() {
             id: provider.id,
             displayName: provider.displayName,
             kind: "oauth",
-            credentialLabel: "Operator OAuth client",
+            credentialLabel: "OAuth session",
             configured,
-            signedIn: status.signedIn === true,
-            verified: status.verified === true,
-            // A rejected or damaged session is not configured, but its
-            // router-managed file must remain removable from every UI.
+            signedIn: configured,
+            verified: configured,
             disconnectable: status.credentialPresent,
             cliInstalled: true,
             cliRunnable: true,
-            action: configured
-              ? "ready"
-              : status.activationPending
-                ? "blocked"
-              : status.signedIn
-                ? "probe"
-                : status.credentialPresent && status.clientReady !== true
-                  ? "blocked"
-                  : "login",
-            ...(!configured && status.signedIn && !status.activationPending
-              ? { probeNote: "A live compatibility test is required before enabling this route; it sends a small prompt and uses provider quota." }
-              : {}),
-            ...(status.activationPending
-              ? {
-                  blockedNote:
-                    "The live proof is pending router health activation. Restart the managed router service, then enable the provider to republish it.",
-                }
-              : {}),
-            ...(!status.signedIn && status.credentialPresent && status.clientReady !== true
-              ? {
-                  blockedNote: status.reconnectRequired
-                    ? "Google rejected this operator OAuth client. Disconnect it, then sign in with a valid operator-owned Google Desktop app client."
-                    : status.recoveryNote ||
-                      "An incompatible router record is preserved. Disconnect it explicitly before starting the operator-owned OAuth sign-in.",
-                }
-              : {}),
+            action: configured ? "ready" : "login",
             ...(catalogSources.length ? { catalogSources } : {}),
           };
         }
@@ -273,7 +246,7 @@ export async function loginOauthProvider(providerId, { signal, deadline } = {}) 
     await ensureNodeDependencies({ signal, deadline });
     const { signInAntigravity } = await import("./antigravity-oauth-onboarding.mjs");
     await signInAntigravity({ signal, deadline });
-    if (!antigravityOAuthStatus().signedIn) {
+    if (!antigravityOAuthStatus().configured) {
       throw new Error("Sign-in finished without a usable Antigravity OAuth session. Please try again.");
     }
     if (providerCatalogSources(providerId).length) {

@@ -339,10 +339,7 @@ function oauthSetupHint(provider) {
     const command = process.platform === "win32"
       ? ".\\codex-router.ps1 providers login antigravity-oauth"
       : "./bin/providers login antigravity-oauth";
-    const probe = process.platform === "win32"
-      ? ".\\codex-router.ps1 providers probe antigravity-oauth --live --yes"
-      : "./bin/providers probe antigravity-oauth --live --yes";
-    return `run \`${command}\`, then explicitly run \`${probe}\` after reviewing its quota cost`;
+    return `run \`${command}\``;
   }
   return "run `kimi login`";
 }
@@ -383,16 +380,8 @@ async function configureProvider(provider) {
         clearTimeout(timer);
       }
       const status = antigravityOAuthStatus();
-      if (!status.signedIn) {
-        throw incomplete(`${provider.displayName} sign-in did not produce a usable credential.`);
-      }
       if (!status.configured) {
-        const probe = process.platform === "win32"
-          ? ".\\codex-router.ps1 providers probe antigravity-oauth --live --yes"
-          : "./bin/providers probe antigravity-oauth --live --yes";
-        throw incomplete(
-          `${provider.displayName} is signed in but remains disabled until the explicit live compatibility test succeeds; run \`${probe}\` after reviewing its quota cost.`,
-        );
+        throw incomplete(`${provider.displayName} sign-in did not produce a usable credential.`);
       }
       return;
     }
@@ -540,17 +529,9 @@ async function main() {
       pendingCredentials.push({
         provider,
         reason,
-        // A normal API provider can remain selected while waiting for a key;
-        // Antigravity cannot: sign-in alone is deliberately insufficient and
-        // its explicit quota-consuming proof has deterministically not passed.
-        withdrawn: provider.id === "antigravity-oauth",
+        withdrawn: false,
       });
       process.stderr.write(`\nWarning: ${provider.displayName} was not configured (${reason})\n`);
-      if (provider.id === "antigravity-oauth") {
-        process.stderr.write(
-          "Antigravity remains unselected until its explicit live proof succeeds and the router confirms its forwarder.\n",
-        );
-      }
     }
   }
   const withdrawnProviders = new Set(
@@ -750,7 +731,6 @@ async function main() {
   }
   if (pendingCredentials.length) {
     const retainedPending = pendingCredentials.filter(({ withdrawn }) => !withdrawn);
-    const withdrawnPending = pendingCredentials.filter(({ withdrawn }) => withdrawn);
     process.stdout.write(
       `\nStill needs provider setup:\n` +
         pendingCredentials
@@ -764,9 +744,6 @@ async function main() {
           .join("") +
         (retainedPending.length
           ? "Providers waiting only for a credential stay selected and start working as soon as it is stored.\n"
-          : "") +
-        (withdrawnPending.length
-          ? "Antigravity remains unselected until its explicit live proof succeeds and the router confirms its forwarder.\n"
           : ""),
     );
   }

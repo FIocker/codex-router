@@ -406,57 +406,13 @@ npm install -g @xai-official/grok
 grok login --oauth
 ```
 
-> [!WARNING]
-> **Antigravity OAuth has no bundled or shared OAuth client.** Create and use a
-> Google OAuth Desktop-app client pair that you own, as described below. A
-> Google AI Pro/Ultra subscription, Gemini API key, Google account, or existing
-> `agy` CLI login does not supply that pair, and the router never copies the
-> official `agy` identity or credential store. Do not use the old
-> `your-integration-client-secret` placeholder: it cannot work.
-
-> [!IMPORTANT]
-> **The Cloud project behind your OAuth client must be allowlisted for
-> `cloudcode-pa.googleapis.com`, and most projects are not.** The bootstrap call
-> is billed to the project that owns the calling OAuth client, so an
-> operator-owned client bills your project rather than Google's. That service is
-> a private API: binding it needs the producer-side
-> `servicemanagement.services.bind` permission, so `gcloud services enable`
-> fails even for the project owner, and it has no API Library entry to enable
-> through the console.
->
-> Sign-in still succeeds; the live probe is what fails, with
-> `PERMISSION_DENIED` / `SERVICE_DISABLED`. If your project is not allowlisted,
-> **this provider cannot currently be used** — there is no operator-side
-> workaround, and no configuration in this repository changes it. See
-> [#566](https://github.com/duolahypercho/codex-router/issues/566).
-
-Create a Google OAuth **Desktop app** client in a Google Cloud project you own:
-
-1. In Google Cloud Console, open **APIs & Services > OAuth consent screen** and
-   configure the app for your account with a truthful name such as **Codex
-   Router**—not Antigravity (add the account as a test user when the consent
-   screen is in testing mode).
-2. Open **APIs & Services > Credentials**, choose **Create credentials > OAuth
-   client ID**, and select **Desktop app**. Keep the resulting client ID and
-   matching secret in that private browser tab.
-3. Run the login command below and enter that one pair only in the local setup
-   page it opens.
-
-Do not copy the official Antigravity/`agy` client or credential store. The
-login command binds `127.0.0.1` on an OS-assigned ephemeral port before it
-constructs the redirect. It opens only a loopback URL through the operating
-system; the local listener redirects the browser to Google, so neither client
-value is put in process arguments or terminal output. The pair and tokens are
-persisted together in the router's owner-only state and are never copied to a
-background-service environment.
-
-If an older incompatible router credential is already present, the new flow
-preserves it and asks you to run `providers disconnect antigravity-oauth`
-before sign-in; it never silently upgrades, reuses, or overwrites that record.
+> Antigravity OAuth uses the router's own browser sign-in and the Google AI
+> Pro/Ultra entitlement on the signed-in account. It needs neither a Gemini API
+> key nor a separate Antigravity CLI. Signing in and enabling are separate so a
+> re-authentication never replaces the rest of the provider selection.
 
 ```sh
 ./bin/model-router codex providers login antigravity-oauth
-./bin/model-router codex providers probe antigravity-oauth --live --yes
 ./bin/model-router codex providers enable antigravity-oauth
 ```
 
@@ -464,30 +420,12 @@ On Windows PowerShell, use the matching wrapper:
 
 ```powershell
 .\model-router.ps1 codex providers login antigravity-oauth
-.\model-router.ps1 codex providers probe antigravity-oauth --live --yes
 .\model-router.ps1 codex providers enable antigravity-oauth
 ```
 
-The probe sends a small real prompt and consumes provider quota. It uses the
-truthful `codex-router` identity and must succeed before the route can be
-enabled. If the account has no companion project, rerun the probe with
-`--provision-project` only after authorizing that side effect. Provisioning still
-requires a successful, schema-valid bootstrap response that explicitly
-advertises the tier it will use; auth errors, server errors, malformed
-responses, and missing tiers all fail closed. This remains an unofficial
-compatibility route over Google's internal Antigravity service,
-not a public Gemini API contract; if Google serves only the impersonated vendor
-client, the router deliberately leaves this provider disabled.
-
-After proof, the command records a nonpublishable pending generation and
-restarts an installed router service. Startup health-checks that exact proof
-and promotes it only after the complete local stack is ready; restart failure
-or process death leaves it disabled. Proof records from the earlier v2 writer
-that have no activation metadata are unverified and require the explicit live
-probe again. Before proof the Antigravity forwarder
-does not bind a port, so an unused provider cannot make the rest of the router
-fail to start. If you run the router in the foreground for development,
-restart that foreground process before enabling the provider.
+The credential stays in the router's owner-only state directory. This is an
+unofficial compatibility route over Google's internal Antigravity service, not
+a public Gemini API contract, so availability and wire behavior can change.
 
 MiMo (Xiaomi API) uses Xiaomi's official OpenAI-compatible endpoint at
 `https://api.xiaomimimo.com/v1`. Unlike MiMo reseller routes, the direct API

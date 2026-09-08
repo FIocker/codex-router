@@ -2078,23 +2078,14 @@ test("catalog-backed mutations preserve complete forward and rollback restart ep
   assert.match(source, /handle\("getChatGptAccountPool"[\s\S]{0,260}timeoutMs: CATALOG_MUTATION_TIMEOUT_MS/);
 });
 
-test("Antigravity probe IPC has one inner deadline and a larger tree-kill margin", async () => {
+test("Antigravity IPC signs in and enables the provider without a separate proof action", async () => {
   const source = await readFile(new URL("../apps/control-center/electron/ipc.mjs", import.meta.url), "utf8");
-  assert.match(source, /ANTIGRAVITY_PROBE_ACTIVATION_TIMEOUT_MS = 10 \* 60_000/);
-  assert.match(
-    source,
-    /ANTIGRAVITY_PROBE_RUNNER_TIMEOUT_MS\s*=\s*ANTIGRAVITY_PROBE_ACTIVATION_TIMEOUT_MS \+ 60_000/,
-  );
   const handler = source.match(/handleAction\("connectProvider"[\s\S]*?\n  \}\);/)?.[0];
   assert.ok(handler, "provider-connect handler should be readable");
-  assert.match(handler, /\["probe-provider", id, "--live", "--yes"\]/);
-  assert.match(handler, /timeoutMs: ANTIGRAVITY_PROBE_RUNNER_TIMEOUT_MS/);
-  assert.match(handler, /CODEX_ROUTER_OPERATION_TIMEOUT_MS:[\s\S]{0,120}ANTIGRAVITY_PROBE_ACTIVATION_TIMEOUT_MS/);
-  assert.match(
-    handler,
-    /\["login", id\][\s\S]{0,220}CODEX_ROUTER_OPERATION_TIMEOUT_MS:[\s\S]{0,120}ANTIGRAVITY_PROBE_ACTIVATION_TIMEOUT_MS/,
-  );
-  assert.doesNotMatch(handler, /\["probe-provider"[\s\S]{0,120}timeoutMs: 120_000/);
+  assert.match(handler, /\["login", id\]/);
+  assert.match(handler, /return updateProviderSelection\(id, true\)/);
+  assert.doesNotMatch(source, /probe-provider/);
+  assert.doesNotMatch(source, /ANTIGRAVITY_PROBE_/);
 });
 
 test("service IPC exposes only safe beta actions and start covers readiness", async () => {

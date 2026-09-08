@@ -964,6 +964,32 @@ function signedProviderStateIsOwned(contents, state) {
   return signedProviderBlockIsOwned(contents, state);
 }
 
+function signedProviderStateIsAbandonedNative(contents, state) {
+  if (
+    state?.version !== 3 ||
+    state.mode !== "root-openai" ||
+    state.managedProvider !== "openai" ||
+    state.loginFree ||
+    state.previousProviderSections.length !== 0
+  ) {
+    return false;
+  }
+  const { rootLines } = splitRoot(contents);
+  const activeProvider = rootValue(rootLines, "model_provider") || "openai";
+  if (
+    activeProvider !== "openai" ||
+    rootHasValue(rootLines, "openai_base_url") ||
+    providerTableRanges(contents, "openai").length !== 0
+  ) {
+    return false;
+  }
+  return ![
+    signedProviderStartMarker,
+    signedProviderEndMarker,
+    signedProviderSlotPrefix,
+  ].some((marker) => contents.includes(marker));
+}
+
 function readProviderModeState() {
   if (!existsSync(CODEX_PROVIDER_MODE_PATH)) return undefined;
   try {
@@ -1539,6 +1565,7 @@ let pendingProviderModeState;
 let clearNativeCatalogSourceAfterWrite = false;
 let activateNativeCatalogSourceAfterWrite = false;
 let pendingSignedProviderModeState;
+let clearAbandonedSignedProviderModeState = false;
 let pendingRouterDefaultState;
 let clearRouterDefaultState = false;
 if (command === "enable") {
@@ -1559,23 +1586,27 @@ if (command === "enable") {
       "A recognized older signed-routing mode is still active; turn it off before updating the router.",
     );
   } else if (signedState) {
-    if (!signedProviderStateIsOwned(current, signedState)) {
+    if (signedProviderStateIsAbandonedNative(current, signedState)) {
+      next = enabledContents(current);
+      clearAbandonedSignedProviderModeState = true;
+    } else if (!signedProviderStateIsOwned(current, signedState)) {
       throw new Error(
         `Signed routing lost ownership while model_provider is ${
           rootValue(splitRoot(current).rootLines, "model_provider") || "openai"
         }; refusing to update it.`,
       );
+    } else {
+      const restored = restoreSignedProviderTable(current, signedState);
+      const enabled = enabledContents(restored);
+      const refreshed = managedSignedProviderContents(
+        enabled,
+        signedState.managedProvider,
+        configuredRouterBaseUrl(),
+        { ownershipId: signedState.ownershipId },
+      );
+      next = refreshed.contents;
+      pendingSignedProviderModeState = refreshed.state;
     }
-    const restored = restoreSignedProviderTable(current, signedState);
-    const enabled = enabledContents(restored);
-    const refreshed = managedSignedProviderContents(
-      enabled,
-      signedState.managedProvider,
-      configuredRouterBaseUrl(),
-      { ownershipId: signedState.ownershipId },
-    );
-    next = refreshed.contents;
-    pendingSignedProviderModeState = refreshed.state;
   } else if (providerState?.version === 1) {
     const active = providerModeStateIsOwned(current, providerState);
     const journal = refreshJournal;
@@ -1973,7 +2004,8 @@ if (existsSync(BACKUP_PATH)) protectPrivateFile(BACKUP_PATH);
 const previousProviderModeState = pendingProviderModeState
   ? readProviderModeState()
   : undefined;
-const previousSignedProviderModeState = pendingSignedProviderModeState
+const previousSignedProviderModeState =
+  pendingSignedProviderModeState || clearAbandonedSignedProviderModeState
   ? readSignedProviderModeState()
   : undefined;
 const previousRouterDefaultState = pendingRouterDefaultState
@@ -1984,6 +2016,7 @@ if (pendingSignedProviderModeState) writeSignedProviderModeState(pendingSignedPr
 if (pendingRouterDefaultState) writeCodexRouterDefault(pendingRouterDefaultState);
 try {
   atomicWrite(next);
+  if (clearAbandonedSignedProviderModeState) clearSignedProviderModeState();
   if (activateNativeCatalogSourceAfterWrite) activateNativeCatalogSource();
 } catch (error) {
   if (pendingProviderModeState) {
@@ -1993,7 +2026,7 @@ try {
       clearProviderModeState();
     }
   }
-  if (pendingSignedProviderModeState) {
+  if (pendingSignedProviderModeState || clearAbandonedSignedProviderModeState) {
     if (previousSignedProviderModeState) {
       writeSignedProviderModeState(previousSignedProviderModeState);
     } else {
@@ -2007,7 +2040,7 @@ try {
       clearCodexRouterDefault();
     }
   }
-  if (activateNativeCatalogSourceAfterWrite) {
+  if (activateNativeCatalogSourceAfterWrite || clearAbandonedSignedProviderModeState) {
     try {
       atomicWrite(current);
     } catch (restoreError) {

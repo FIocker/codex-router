@@ -94,12 +94,6 @@ const PROVIDER_USAGE_TIMEOUT_MS = 120_000;
 // here reads to the operator as "your model failed" when it did not.
 const SUBAGENT_CERTIFY_TIMEOUT_MS = 600_000;
 const ROUTER_BROWSER_OAUTH_TIMEOUT_MS = 11 * 60_000;
-// The live compatibility request and the managed service readiness gate share
-// one ten-minute budget. The command runner gets one extra minute solely to
-// terminate the complete child tree and return a truthful failure to the UI.
-const ANTIGRAVITY_PROBE_ACTIVATION_TIMEOUT_MS = 10 * 60_000;
-const ANTIGRAVITY_PROBE_RUNNER_TIMEOUT_MS =
-  ANTIGRAVITY_PROBE_ACTIVATION_TIMEOUT_MS + 60_000;
 // Repair reruns the installer with --force-deps, which rebuilds node_modules
 // and the Python environment from scratch. That is the slowest thing this app
 // can start, so it gets the runner's whole ceiling rather than a catalog-sized
@@ -1529,40 +1523,12 @@ export function registerIpcHandlers({
   handleAction("connectProvider", async ({ providerId } = {}) => {
     const { id, provider } = await validateProvider(providerId, "sign-in");
     if (id === "antigravity-oauth") {
-      if (provider.action === "blocked") {
-        throw new Error(
-          "Disconnect the incompatible router-owned Antigravity record before signing in.",
-        );
-      }
-      if (provider.action === "probe") {
-        // The button names the live request and its quota cost. Carry both
-        // consent flags only from that explicit action, then publish the
-        // provider after the truthful request has succeeded.
-        await runControl(
-          ["probe-provider", id, "--live", "--yes"],
-          {
-            timeoutMs: ANTIGRAVITY_PROBE_RUNNER_TIMEOUT_MS,
-            environmentOverrides: {
-              CODEX_ROUTER_OPERATION_TIMEOUT_MS: String(
-                ANTIGRAVITY_PROBE_ACTIVATION_TIMEOUT_MS,
-              ),
-            },
-          },
-        );
-        return updateProviderSelection(id, true);
-      }
-      // This is the router-owned loopback browser flow, not a vendor CLI. It
-      // works identically on macOS, Windows, and Linux and receives no secret
-      // in argv or IPC.
+      // This is the router-managed browser flow and receives no token in argv
+      // or IPC.
       await runControl(["login", id], {
         timeoutMs: ROUTER_BROWSER_OAUTH_TIMEOUT_MS,
-        environmentOverrides: {
-          CODEX_ROUTER_OPERATION_TIMEOUT_MS: String(
-            ANTIGRAVITY_PROBE_ACTIVATION_TIMEOUT_MS,
-          ),
-        },
       });
-      return { providerId: id, pending: false };
+      return updateProviderSelection(id, true);
     }
     if (!terminalAvailable()) {
       throw new Error("Provider CLI sign-in must be run in your own terminal on Windows or Linux.");

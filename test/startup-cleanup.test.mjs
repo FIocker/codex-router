@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { writePrivateJson } from "../src/file-security.mjs";
 import { freePort } from "./port-pool.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -30,7 +29,7 @@ async function portIsClosed(port) {
   });
 }
 
-// Startup spawns five children — the three forwarders in parallel, then the
+// Startup spawns six children — the four forwarders in parallel, then the
 // gateway and frontend in sequence — each gated on an HTTP
 // health probe that backs off from 200 ms to a 2 s cap between refused probes
 // and widens the probe window itself from 1 s to a 10 s cap. That makes the run
@@ -94,38 +93,15 @@ function waitForStartupExit(child, readErrors) {
 // has to clear a loaded run (~19 s) plus one full stall window (30 s), so 20 s
 // was actually below the floor for reporting a stall at all. A passing run is
 // unaffected -- this bound is only reached when something is already broken.
-test("startup failure cleans up children and leaves a pending Antigravity proof inactive", { timeout: 120_000 }, async () => {
+test("startup failure terminates services that already became healthy", { timeout: 120_000 }, async () => {
   const ports = await Promise.all(Array.from({ length: 6 }, () => freePort()));
   assert.equal(new Set(ports).size, ports.length);
-  const [routerPort, gatewayPort, oauthPort, apiPort, grokOauthPort, antigravityPort] = ports;
+  const [routerPort, gatewayPort, oauthPort, apiPort, grokOauthPort, antigravityOauthPort] = ports;
   const rootDir = mkdtempSync(path.join(os.tmpdir(), "model-router-startup-cleanup-"));
   const stateDir = path.join(rootDir, "state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   writeFileSync(path.join(stateDir, "internal-secret"), "startup-internal-key-with-sufficient-length\n", { mode: 0o600 });
   writeFileSync(path.join(stateDir, "caller-secret"), "startup-caller-key-with-sufficient-length\n", { mode: 0o600 });
-  const antigravityTokenPath = path.join(stateDir, "antigravity-oauth.json");
-  const activationGeneration = "77777777-7777-4777-8777-777777777777";
-  writePrivateJson(antigravityTokenPath, {
-    version: 3,
-    managed_by: "codex-router",
-    session_generation: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-    client_id: "startup-test.apps.googleusercontent.com",
-    client_secret: "startup-antigravity-client-secret",
-    access_token: "startup-antigravity-access-token",
-    refresh_token: "startup-antigravity-refresh-token",
-    expires_at: Math.floor(Date.now() / 1_000) + 3600,
-    expires_in: 3600,
-    project_id: "startup-managed-project",
-    project_source: "managed",
-    probe_version: 1,
-    probe_verified_at: Date.now(),
-    probe_model: "gemini-3.1-pro",
-    probe_activation: {
-      version: 1,
-      state: "pending_activation",
-      generation: activationGeneration,
-    },
-  });
 
   const child = spawn(process.execPath, [path.join(root, "src", "start.mjs")], {
     cwd: root,
@@ -138,7 +114,7 @@ test("startup failure cleans up children and leaves a pending Antigravity proof 
       MODEL_ROUTER_OAUTH_PORT: String(oauthPort),
       MODEL_ROUTER_API_PORT: String(apiPort),
       MODEL_ROUTER_GROK_OAUTH_PORT: String(grokOauthPort),
-      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(antigravityPort),
+      MODEL_ROUTER_ANTIGRAVITY_OAUTH_PORT: String(antigravityOauthPort),
       MODEL_ROUTER_LITELLM_BIN: process.execPath,
     },
     stdio: ["ignore", "ignore", "pipe"],
@@ -158,19 +134,9 @@ test("startup failure cleans up children and leaves a pending Antigravity proof 
       errors,
       /startup failed: LiteLLM gateway exited before becoming healthy\./,
     );
-    assert.match(errors, /\[antigravity-oauth\] listening/);
     assert.doesNotMatch(errors, /startup-internal-key-with-sufficient-length/);
     assert.doesNotMatch(errors, /startup-caller-key-with-sufficient-length/);
-    assert.doesNotMatch(errors, /startup-antigravity-client-secret/);
-    assert.doesNotMatch(errors, /startup-antigravity-access-token/);
-    assert.doesNotMatch(errors, /startup-antigravity-refresh-token/);
-    const stored = JSON.parse(readFileSync(antigravityTokenPath, "utf8"));
-    assert.deepEqual(stored.probe_activation, {
-      version: 1,
-      state: "pending_activation",
-      generation: activationGeneration,
-    });
-    for (const port of [oauthPort, apiPort, grokOauthPort, antigravityPort]) {
+    for (const port of [oauthPort, apiPort, grokOauthPort, antigravityOauthPort]) {
       assert.equal(await portIsClosed(port), true, `orphaned child still owns port ${port}`);
     }
   } finally {

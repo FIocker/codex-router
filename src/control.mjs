@@ -32,7 +32,6 @@ import { presenceSnapshot } from "./presence-state.mjs";
 import { harnessSnapshotWithWeb } from "./dsh-install.mjs";
 import { USER_MODELS_PATH } from "./user-models.mjs";
 import { refreshTargetPickerIfInstalled } from "./target-integration.mjs";
-import { activateAntigravityProbe } from "./antigravity-probe-activation.mjs";
 import {
   chatGptSessionStatus,
   setChatGptSessionSharingFromControl,
@@ -86,8 +85,7 @@ const TARGETS = [
 ];
 const args = process.argv.slice(2);
 const boundedAntigravityOperation =
-  (args[0] === "login" && args[1] === "antigravity-oauth") ||
-  (args[0] === "probe-provider" && args[1] === "antigravity-oauth");
+  args[0] === "login" && args[1] === "antigravity-oauth";
 const restartBearingOverlayOperation = new Set([
   "set-apply",
   "credential",
@@ -816,71 +814,10 @@ async function loginProvider(providerId) {
     clearTimeout(timer);
   }
   if (providerId === "antigravity-oauth") {
-    // A re-login intentionally clears the previous live proof. Republish now
-    // so installed clients cannot keep advertising the route while it is in
-    // that fail-closed state; the provider selection itself is preserved.
+    // Republish after browser authentication so installed clients see the
+    // refreshed private Google session without waiting for another mutation.
     await withModelOverlayLock(() => refreshTargetPickerIfInstalled());
   }
-  process.stdout.write(`${JSON.stringify(providerOnboardingSnapshot())}\n`);
-}
-
-async function probeProvider(providerId, flags) {
-  if (providerId !== "antigravity-oauth") {
-    throw new Error("Only antigravity-oauth has a router-managed live compatibility probe.");
-  }
-  const allowed = new Set(["--live", "--yes", "--provision-project"]);
-  const unknown = flags.find((flag) => !allowed.has(flag));
-  if (unknown) {
-    throw new Error(
-      `Unknown Antigravity probe option: ${unknown}. ` +
-        "Usage: control probe-provider antigravity-oauth --live --yes [--provision-project]",
-    );
-  }
-  const { probeAntigravity } = await import("./antigravity-oauth-probe.mjs");
-  const { forgetProviderCatalogFamilyCache } = await import("./provider-catalogs.mjs");
-  const deadline = operationDeadlineFromEnvironment(process.env, {
-    timeoutMs: 10 * 60_000,
-    maximumMs: 10 * 60_000,
-  });
-  const operationTimeoutMs = remainingOperationMs(deadline);
-  const controller = new AbortController();
-  const deadlineTimer = setTimeout(() => {
-    const error = new Error(
-      "Antigravity probe activation timed out before the live request, service readiness, and publication completed.",
-    );
-    error.code = "antigravity_activation_timeout";
-    controller.abort(error);
-  }, operationTimeoutMs);
-  deadlineTimer.unref?.();
-  const remainingLockWaitMs = (operationDeadline) =>
-    Math.max(0, Math.min(120_000, operationDeadline - Date.now()));
-  const refreshInstalledClients = ({
-    signal = controller.signal,
-    deadline: operationDeadline = deadline,
-  } = {}) => withModelOverlayLock(async () => {
-    signal?.throwIfAborted();
-    await forgetProviderCatalogFamilyCache(providerId);
-    signal?.throwIfAborted();
-    return refreshTargetPickerIfInstalled({ signal, deadline: operationDeadline });
-  }, { waitMs: remainingLockWaitMs(operationDeadline) });
-  try {
-    await activateAntigravityProbe({
-      probe: probeAntigravity,
-      probeOptions: {
-        live: flags.includes("--live"),
-        confirmed: flags.includes("--yes"),
-        allowOnboard: flags.includes("--provision-project"),
-      },
-      withdraw: refreshInstalledClients,
-      restart: restartRouterForLocalRoutes,
-      publish: refreshInstalledClients,
-      signal: controller.signal,
-      deadline,
-    });
-  } finally {
-    clearTimeout(deadlineTimer);
-  }
-  const { providerOnboardingSnapshot } = await import("./provider-onboarding.mjs");
   process.stdout.write(`${JSON.stringify(providerOnboardingSnapshot())}\n`);
 }
 
@@ -3351,11 +3288,6 @@ if (args.includes("--probe")) {
 } else if (args[0] === "login") {
   if (!args[1]) throw new Error("Usage: control login <oauth-provider>");
   await loginProvider(args[1]);
-} else if (args[0] === "probe-provider") {
-  if (!args[1]) {
-    throw new Error("Usage: control probe-provider antigravity-oauth --live --yes [--provision-project]");
-  }
-  await probeProvider(args[1], args.slice(2));
 } else if (args[0] === "catalog-cache") {
   if (args[1] !== "invalidate" || !args[2]) {
     throw new Error("Usage: control catalog-cache invalidate <provider>");

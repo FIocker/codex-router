@@ -1738,6 +1738,67 @@ Authorization = "Bearer UPDATE_HEADER_SECRET"
   }
 });
 
+test("ordinary enable retires an abandoned root-openai signed marker", () => {
+  const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-signed-abandoned-"));
+  const stateDir = path.join(codexHome, "router-state");
+  const configPath = path.join(codexHome, "config.toml");
+  const statePath = path.join(stateDir, "signed-provider-mode.json");
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  writeFileSync(configPath, 'model = "gpt-5.6-sol"\n', { mode: 0o600 });
+  writeFileSync(
+    statePath,
+    `${JSON.stringify({
+      version: 3,
+      mode: "root-openai",
+      managedProvider: "openai",
+      managedBaseUrl: `http://127.0.0.1:46192/_codex-router/${CALLER_KEY}/v1`,
+      ownershipId: "11111111111111111111111111111111",
+      previousProviderSections: [],
+    }, null, 2)}\n`,
+    { mode: 0o600 },
+  );
+
+  try {
+    const updated = run("enable", codexHome, stateDir);
+    assert.equal(updated.mode, "router");
+    assert.equal(updated.signed_provider_state_present, false);
+    assert.equal(existsSync(statePath), false);
+    assert.match(readFileSync(configPath, "utf8"), /# BEGIN codex-router-managed/);
+  } finally {
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
+test("ordinary enable preserves an abandoned marker when the provider changed", () => {
+  const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-signed-abandoned-drift-"));
+  const stateDir = path.join(codexHome, "router-state");
+  const configPath = path.join(codexHome, "config.toml");
+  const statePath = path.join(stateDir, "signed-provider-mode.json");
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const original = 'model_provider = "custom"\n';
+  writeFileSync(configPath, original, { mode: 0o600 });
+  writeFileSync(
+    statePath,
+    `${JSON.stringify({
+      version: 3,
+      mode: "root-openai",
+      managedProvider: "openai",
+      managedBaseUrl: `http://127.0.0.1:46192/_codex-router/${CALLER_KEY}/v1`,
+      ownershipId: "11111111111111111111111111111111",
+      previousProviderSections: [],
+    }, null, 2)}\n`,
+    { mode: 0o600 },
+  );
+
+  try {
+    assert.throws(() => run("enable", codexHome, stateDir), /lost ownership/);
+    assert.equal(readFileSync(configPath, "utf8"), original);
+    assert.equal(existsSync(statePath), true);
+  } finally {
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
 test("ordinary update upgrades v2 signed state and captures subtables it previously left active", () => {
   const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-signed-v2-update-"));
   const stateDir = path.join(codexHome, "router-state");

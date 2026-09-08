@@ -23,7 +23,6 @@ import { writeLiteLlmConfig } from "./litellm-config.mjs";
 import { MODELS } from "./model-registry.mjs";
 import { readLocalModelSelection } from "./local-models.mjs";
 import { antigravityOAuthStartupState } from "./antigravity-oauth-status.mjs";
-import { attemptAntigravityProbePromotionAfterReadiness } from "./antigravity-probe-activation.mjs";
 import { spawnableCommand } from "./spawnable-command.mjs";
 import { ensureOllamaHeadless } from "./ollama-runtime.mjs";
 import { venvRuntimeProblem } from "./venv-runtime.mjs";
@@ -419,23 +418,6 @@ async function main() {
       console.error(`[codex-router] Native drift check failed: ${error.message}`);
     });
 
-  if (antigravityStartup.pendingActivationGeneration) {
-    const promoted = await attemptAntigravityProbePromotionAfterReadiness({
-      generation: antigravityStartup.pendingActivationGeneration,
-      sessionGeneration: antigravityStartup.pendingSessionGeneration,
-      children,
-    });
-    if (!promoted) {
-      // Never log the generation or any credential material. A concurrent
-      // replacement/disconnect, a newer probe, or a child death all leave the
-      // pending proof nonpublishable; the service can still serve every other
-      // provider while the initiating command reports that exact activation
-      // was not confirmed.
-      console.error(
-        "[codex-router] Antigravity live-proof activation was superseded or startup lost a child; the route remains disabled.",
-      );
-    }
-  }
   const cursorEdge = cursorInstalled
     ? run(process.execPath, [path.join(SOURCE_ROOT, "src", "cursor-public-edge.mjs")])
     : undefined;

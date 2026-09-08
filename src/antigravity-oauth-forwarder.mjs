@@ -15,21 +15,15 @@ import {
   toAntigravityRequest,
 } from "./antigravity-oauth-shape.mjs";
 import {
-  assertAntigravitySessionActivated,
   ensureFreshAntigravitySession,
-  readAntigravityToken,
 } from "./antigravity-oauth-session.mjs";
-import {
-  assertAntigravityProjectRevisionCurrent,
-  ensureAntigravityProject,
-} from "./antigravity-project.mjs";
+import { ensureAntigravityProject } from "./antigravity-project.mjs";
 import { antigravityOAuthStatus } from "./antigravity-oauth-status.mjs";
 import { installStableFetchTransport } from "./fetch-transport.mjs";
 import {
   applyKeepAliveTimeouts,
   formatErrorChain,
   httpErrorStatus,
-  installGracefulShutdown,
   readRequestBody,
   reportListenFailure,
   requireInternalAuth,
@@ -56,12 +50,6 @@ const UPSTREAM_IDLE_TIMEOUT_MS = positiveTimeout(
 const TERMINAL_USAGE_GRACE_MS = positiveTimeout(
   process.env.ANTIGRAVITY_TERMINAL_GRACE_MS,
   2_000,
-);
-
-// Guard against an unbounded in-memory SSE buffer: a slow trickle without a
-// boundary should time out on bytes rather than growing without limit.
-const MAX_SSE_BUFFER_BYTES = Number(
-  process.env.ANTIGRAVITY_MAX_SSE_BUFFER_BYTES || 4 * 1024 * 1024,
 );
 
 const RETRYABLE_ENDPOINT_STATUSES = new Set([404, 408, 429, 500, 502, 503, 504]);
@@ -131,42 +119,15 @@ export function parseAntigravitySseEvent(rawEvent) {
   }
 }
 
-function streamAbortReason(signal) {
-  return signal?.reason instanceof Error
-    ? signal.reason
-    : new AntigravityForwarderError("The Antigravity stream was cancelled.", {
-      status: 499,
-      code: "caller_aborted",
-    });
-}
-
-function throwIfStreamAborted(signal) {
-  if (signal?.aborted) throw streamAbortReason(signal);
-}
-
-function readWithTimeout(reader, timeoutMs, { terminal = false, signal } = {}) {
-  throwIfStreamAborted(signal);
+function readWithTimeout(reader, timeoutMs, { terminal = false } = {}) {
   let timer;
-  let abort;
-  const aborted = signal
-    ? new Promise((_, reject) => {
-      abort = () => reject(streamAbortReason(signal));
-      signal.addEventListener("abort", abort, { once: true });
-    })
-    : new Promise(() => {});
   return Promise.race([
     reader.read().then((result) => ({ kind: "read", result })),
     new Promise((resolve) => {
-      // Kept referenced: the timeout is what unblocks an upstream that never
-      // produces data, so it must be able to fire even when nothing else is
-      // holding the event loop open.
       timer = setTimeout(() => resolve({ kind: terminal ? "terminal_timeout" : "timeout" }), timeoutMs);
+      timer.unref?.();
     }),
-    aborted,
-  ]).finally(() => {
-    clearTimeout(timer);
-    if (abort) signal.removeEventListener("abort", abort);
-  });
+  ]).finally(() => clearTimeout(timer));
 }
 
 export async function consumeAntigravitySseStream(
@@ -177,34 +138,20 @@ export async function consumeAntigravitySseStream(
     terminalGraceMs = TERMINAL_USAGE_GRACE_MS,
     isTerminal = () => false,
     shouldStop = () => false,
-    signal,
   } = {},
 ) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let sawDone = false;
-  // A terminal candidate is still only a prefix until Google sends [DONE] or
-  // closes the body. Give trailers one fixed grace window; payload traffic
-  // inside that window must not extend it indefinitely.
-  let terminalDeadline;
   try {
     for (;;) {
-      throwIfStreamAborted(signal);
       const terminal = isTerminal();
-      if (terminal && terminalDeadline === undefined) {
-        terminalDeadline = Date.now() + terminalGraceMs;
-      }
-      const timeoutMs = terminal
-        ? Math.max(0, terminalDeadline - Date.now())
-        : idleTimeoutMs;
-      if (terminal && timeoutMs === 0) break;
       const outcome = await readWithTimeout(
         reader,
-        timeoutMs,
-        { terminal, signal },
+        terminal ? terminalGraceMs : idleTimeoutMs,
+        { terminal },
       );
-      throwIfStreamAborted(signal);
       if (outcome.kind === "terminal_timeout") break;
       if (outcome.kind === "timeout") {
         throw new AntigravityForwarderError(
@@ -215,12 +162,6 @@ export async function consumeAntigravitySseStream(
       const { value, done } = outcome.result;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      if (buffer.length > MAX_SSE_BUFFER_BYTES) {
-        throw new AntigravityForwarderError(
-          `Google Antigravity SSE stream exceeded its buffer limit before a message boundary.`,
-          { status: 504, code: "upstream_stream_too_large" },
-        );
-      }
       let boundary;
       while ((boundary = nextSseBoundary(buffer))) {
         const rawEvent = buffer.slice(0, boundary.at);
@@ -232,10 +173,6 @@ export async function consumeAntigravitySseStream(
         }
         if (event) {
           await handler(event.payload);
-          throwIfStreamAborted(signal);
-          if (isTerminal() && terminalDeadline === undefined) {
-            terminalDeadline = Date.now() + terminalGraceMs;
-          }
           if (shouldStop()) {
             sawDone = true;
             break;
@@ -244,15 +181,11 @@ export async function consumeAntigravitySseStream(
       }
       if (sawDone) break;
     }
-    throwIfStreamAborted(signal);
     buffer += decoder.decode();
     if (!sawDone && buffer.trim()) {
       const event = parseAntigravitySseEvent(buffer);
       if (event?.done) sawDone = true;
-      else if (event) {
-        await handler(event.payload);
-        throwIfStreamAborted(signal);
-      }
+      else if (event) await handler(event.payload);
     }
   } finally {
     await reader.cancel().catch(() => {});
@@ -279,6 +212,7 @@ async function fetchWithHeaderTimeout(endpoint, { accessToken, serializedBody, s
       ),
     );
   }, UPSTREAM_HEADER_TIMEOUT_MS);
+  timer.unref?.();
   try {
     return await fetchImpl(
       `${endpoint.replace(/\/$/, "")}/v1internal:streamGenerateContent?alt=sse`,
@@ -330,46 +264,39 @@ export async function requestAntigravityUpstream({
   signal,
   fetchImpl = fetch,
   endpoints = endpointCandidates(),
-  beforeAttempt,
 }) {
-  let upstream;
-  for (let index = 0; index < endpoints.length; index += 1) {
-    // Keep the local authorization assertion outside the transport wrapper:
-    // a revoked proof/session is a deliberate fail-closed refusal, not a
-    // provider network failure. The callback also runs for endpoint fallback.
-    const attemptAccessToken = beforeAttempt
-      ? await beforeAttempt({ index, endpoint: endpoints[index] })
-      : accessToken;
-    try {
+  try {
+    let upstream;
+    for (let index = 0; index < endpoints.length; index += 1) {
       upstream = await fetchWithHeaderTimeout(endpoints[index], {
-        accessToken: attemptAccessToken,
+        accessToken,
         serializedBody,
         signal,
         fetchImpl,
       });
-    } catch (error) {
-      if (signal?.aborted) {
-        const callerError = new AntigravityForwarderError("The caller cancelled the request.", {
-          status: 499,
-          code: "caller_aborted",
-        });
-        callerError.callerAborted = true;
-        callerError.cause = error;
-        throw callerError;
-      }
-      if (error?.expose === true) throw error;
-      const transportError = new AntigravityForwarderError(
-        "The Antigravity OAuth forwarder could not reach Google.",
-        { status: 502, code: "upstream_transport_error" },
-      );
-      transportError.cause = error;
-      throw transportError;
+      const hasFallback = index + 1 < endpoints.length;
+      if (!hasFallback || !RETRYABLE_ENDPOINT_STATUSES.has(upstream.status)) return upstream;
+      await discardUpstream(upstream);
     }
-    const hasFallback = index + 1 < endpoints.length;
-    if (!hasFallback || !RETRYABLE_ENDPOINT_STATUSES.has(upstream.status)) return upstream;
-    await discardUpstream(upstream);
+    return upstream;
+  } catch (error) {
+    if (signal?.aborted) {
+      const callerError = new AntigravityForwarderError("The caller cancelled the request.", {
+        status: 499,
+        code: "caller_aborted",
+      });
+      callerError.callerAborted = true;
+      callerError.cause = error;
+      throw callerError;
+    }
+    if (error?.expose === true) throw error;
+    const transportError = new AntigravityForwarderError(
+      "The Antigravity OAuth forwarder could not reach Google.",
+      { status: 502, code: "upstream_transport_error" },
+    );
+    transportError.cause = error;
+    throw transportError;
   }
-  return upstream;
 }
 
 function safeUpstreamHeaders(headers) {
@@ -494,47 +421,7 @@ function endOpenAiErrorStream(response, error, status) {
   }
 }
 
-function assertAntigravityRouteCurrent(session, activationGeneration) {
-  if (!antigravityOAuthStatus().configured) {
-    const error = new Error(
-      "Antigravity OAuth routing requires an active truthful live proof and owner-only credential permissions.",
-    );
-    error.code = "antigravity_probe_required";
-    error.status = 403;
-    throw error;
-  }
-  return assertAntigravitySessionActivated(session, activationGeneration);
-}
-
 async function handleChatCompletions(request, response) {
-  if (!antigravityOAuthStatus().configured) {
-    writeJson(response, 403, {
-      error: {
-        message:
-          "Antigravity OAuth remains disabled until the explicit truthful live compatibility probe succeeds.",
-        type: "authentication_error",
-        code: "antigravity_probe_required",
-      },
-    });
-    return;
-  }
-  let admittedSession;
-  let requestActivationGeneration;
-  try {
-    admittedSession = assertAntigravityRouteCurrent(readAntigravityToken());
-    requestActivationGeneration = admittedSession.probe_activation.generation;
-  } catch {
-    writeJson(response, 403, {
-      error: {
-        message:
-          "Antigravity OAuth remains disabled until the explicit truthful live compatibility probe succeeds.",
-        type: "authentication_error",
-        code: "antigravity_probe_required",
-      },
-    });
-    return;
-  }
-  const requestGeneration = admittedSession.session_generation;
   let chat;
   try {
     chat = JSON.parse((await readRequestBody(request)).toString("utf8"));
@@ -544,25 +431,6 @@ async function handleChatCompletions(request, response) {
         message: "The Antigravity OAuth forwarder expected a JSON request body.",
         type: "invalid_request_error",
         code: "invalid_json",
-      },
-    });
-    return;
-  }
-  try {
-    // The body can arrive arbitrarily slowly. Reassert the exact session and
-    // proof admitted above only after it is complete, before any project or
-    // provider request can inherit a replacement credential.
-    admittedSession = assertAntigravityRouteCurrent(
-      admittedSession,
-      requestActivationGeneration,
-    );
-  } catch (error) {
-    const status = httpErrorStatus(error, 409);
-    writeJson(response, status, {
-      error: {
-        message: error?.message || "The Antigravity OAuth session changed; retry the request.",
-        type: status === 401 || status === 403 ? "authentication_error" : "invalid_request_error",
-        code: error?.code || null,
       },
     });
     return;
@@ -577,25 +445,9 @@ async function handleChatCompletions(request, response) {
   });
 
   const sessionAndProject = async ({ force = false } = {}) => {
-    let session = await ensureFreshAntigravitySession({
-      force,
-      signal: controller.signal,
-      expectedGeneration: requestGeneration,
-    });
-    session = assertAntigravityRouteCurrent(session, requestActivationGeneration);
-    return ensureAntigravityProject(session, {
-      signal: controller.signal,
-      // `force` is the retry path: the previous attempt failed, so a recorded
-      // fallback must not be replayed from inside its TTL.
-      forceFallbackRefresh: force,
-    });
+    const session = await ensureFreshAntigravitySession({ force });
+    return ensureAntigravityProject(session, { forceFallbackRefresh: force });
   };
-
-  // Shape before touching OAuth state or an upstream. Unsupported forced tools
-  // are caller errors, and must remain a named local 400 even when the account
-  // is signed out or its cached session needs a network refresh.
-  const requestId = `agent-${randomUUID()}`;
-  let shapedBody = toAntigravityRequest(chat, { requestId });
 
   let context;
   try {
@@ -616,58 +468,27 @@ async function handleChatCompletions(request, response) {
     return;
   }
 
+  const requestId = `agent-${randomUUID()}`;
+  let shapedBody;
   const makeUpstreamRequest = async (current) => {
-    const active = assertAntigravityRouteCurrent(
-      current.session,
-      requestActivationGeneration,
-    );
-    assertAntigravityProjectRevisionCurrent(current.session);
     shapedBody = toAntigravityRequest(chat, {
       projectId: current.projectId,
       requestId,
     });
     return requestAntigravityUpstream({
-      accessToken: active.access_token,
+      accessToken: current.session.access_token,
       serializedBody: JSON.stringify(shapedBody),
       signal: controller.signal,
-      beforeAttempt: () => {
-        const latest = assertAntigravityRouteCurrent(
-          current.session,
-          requestActivationGeneration,
-        );
-        assertAntigravityProjectRevisionCurrent(current.session);
-        return latest.access_token;
-      },
     });
   };
 
-  let upstream;
-  try {
-    upstream = await makeUpstreamRequest(context);
-  } catch (error) {
-    if (![
-      "oauth_session_changed",
-      "project_context_changed",
-      "antigravity_probe_required",
-    ].includes(error?.code)) throw error;
-    const status = httpErrorStatus(error, 409);
-    writeJson(response, status, {
-      error: {
-        message: error.message,
-        type: status === 403 ? "authentication_error" : "invalid_request_error",
-        code: error.code,
-      },
-    });
-    return;
-  }
+  let upstream = await makeUpstreamRequest(context);
   if (upstream.status === 401) {
     await discardUpstream(upstream);
     try {
-      assertAntigravityRouteCurrent(context.session, requestActivationGeneration);
-      assertAntigravityProjectRevisionCurrent(context.session);
       context = await sessionAndProject({ force: true });
-      // A forced refresh may load a different account snapshot. Refresh both
-      // access token and project while retaining the validated request id.
+      // A forced refresh may load a different account snapshot. Rebuild both
+      // access token and project in one body while retaining the request id.
       upstream = await makeUpstreamRequest(context);
     } catch (error) {
       const status = httpErrorStatus(error, 401);
@@ -725,7 +546,6 @@ async function handleChatCompletions(request, response) {
     }, {
       isTerminal: () => state.sawTerminal,
       shouldStop: () => state.sawTerminal && Boolean(state.usage),
-      signal: controller.signal,
     });
     turn = finalizeAntigravityTurn(state);
   } catch (error) {
@@ -835,5 +655,7 @@ if (isMain) {
     console.error("[antigravity-oauth] listening");
   });
 
-  installGracefulShutdown(server, { label: "antigravity-oauth" });
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => server.close(() => process.exit(0)));
+  }
 }
