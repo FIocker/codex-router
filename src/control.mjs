@@ -96,6 +96,11 @@ const restartBearingOverlayOperation = new Set([
   "local-models",
   "signed-routing",
 ]).has(args[0]);
+// Account selection can restart the desktop and republish its per-account
+// catalog under the same 22-minute Control Center transaction as an overlay
+// mutation. Recognize that contracted deadline here so the already-contained
+// GUI child does not add a second, terminal-style Windows process owner.
+const restartBearingAccountOperation = args[0] === "chatgpt-account-pool";
 const selfReplacingControl =
   args[0] === "maintenance" ||
   (args[0] === "tray" && ["refresh", "rebuild"].includes(args[1]));
@@ -104,7 +109,7 @@ const selfReplacingControl =
 // retire the inner process tree before a desktop watchdog may intervene.
 const maximumControlOperationMs = boundedAntigravityOperation
   ? 610_000
-  : restartBearingOverlayOperation
+  : restartBearingOverlayOperation || restartBearingAccountOperation
     ? 1_310_000
     : 850_000;
 if (!selfReplacingControl && !boundedOperationChild(process.env, {

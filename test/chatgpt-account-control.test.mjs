@@ -98,6 +98,25 @@ test("account auto-restart preference is explicit, durable, and defaults back of
   assert.equal(run("chatgpt-account-pool", "status").preferences.autoRestart, false);
 });
 
+test("a Control Center account deadline does not add a second process-tree owner", () => {
+  const output = execFileSync(
+    process.execPath,
+    [path.join(root, "src/control.mjs"), "chatgpt-account-pool", "menu-status"],
+    {
+      env: {
+        ...env,
+        CODEX_ROUTER_OPERATION_CHILD: "1",
+        CODEX_ROUTER_OPERATION_DEADLINE_MS: String(Date.now() + 1_300_000),
+        // A redundant owner would try to consume this deliberately invalid
+        // coordinator and fail before the account command could run.
+        CODEX_ROUTER_OWNER_SIGNAL_BARRIER_DIR: path.join(stateDir, "missing-coordinator"),
+      },
+      encoding: "utf8",
+    },
+  );
+  assert.ok(JSON.parse(output).accounts);
+});
+
 test("no-discovery account reads never import account modules or create pool state", () => {
   const isolated = mkdtempSync(path.join(os.tmpdir(), "codex-account-no-discovery-"));
   const loader = path.join(isolated, "import-audit-loader.mjs");
@@ -154,6 +173,8 @@ test("one production account status poll owns pending profile reconciliation", (
   const accountPool = source.match(/async function handleChatGptAccountSwitch[\s\S]*?\r?\n}\r?\n\r?\n\/\/ The public/)?.[0];
   assert.ok(accountUsage);
   assert.ok(accountPool);
+  assert.match(source, /const restartBearingAccountOperation = args\[0\] === "chatgpt-account-pool"/);
+  assert.match(source, /restartBearingOverlayOperation \|\| restartBearingAccountOperation\s*\? 1_310_000/);
   assert.doesNotMatch(accountUsage, /reconcileChatGPTProfileSwitchIfReady/);
   assert.match(accountPool, /if \(!action \|\| action === "status"\)[\s\S]*?await reconcileChatGPTProfileSwitchIfReady\(\)/);
   assert.match(accountPool, /await refreshBoundedChatGPTSubscriptionAccounts\(beforeRefresh\)/);
