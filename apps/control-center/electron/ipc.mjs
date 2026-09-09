@@ -1264,6 +1264,8 @@ export function registerIpcHandlers({
   cursorProcessReader = readRunningCursorProcesses,
   cursorWait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   controlJsonRunner = runControlJson,
+  chatGptExecutableResolver = executablePath,
+  chatGptBrowserCommandRunner = openBrowserCommand,
   harnessSnapshotReader = getHarnessSnapshot,
   harnessExecutableResolver = executablePath,
   cursorAppPath = cursorDesktopPath,
@@ -1729,11 +1731,11 @@ export function registerIpcHandlers({
     // switch or login finalization holds that lock, control.mjs reports the
     // contention after ten seconds instead of leaving an optimistic row behind
     // a minute-long subprocess followed by a long reconciliation read.
-    return runJson(["chatgpt-account-pool", "add", label.trim()], { timeoutMs: 20_000 });
+    return controlJsonRunner(["chatgpt-account-pool", "add", label.trim()], { timeoutMs: 20_000 });
   });
   handleAction("loginChatGptSubscriptionAccount", async ({ accountId } = {}) => {
     const id = stringValue(accountId, "Account id", CHATGPT_ACCOUNT_ID);
-    const pool = await runJson(
+    const pool = await controlJsonRunner(
       ["chatgpt-account-pool", "status"],
       { timeoutMs: CATALOG_MUTATION_TIMEOUT_MS },
     );
@@ -1761,9 +1763,9 @@ export function registerIpcHandlers({
         alreadyAuthenticated: true,
       };
     }
-    const codex = executablePath("codex");
+    const codex = chatGptExecutableResolver("codex");
     if (!codex) throw new Error("Codex CLI is not installed.");
-    const profile = await runJson(["chatgpt-account-pool", "home", id], { timeoutMs: 20_000 });
+    const profile = await controlJsonRunner(["chatgpt-account-pool", "home", id], { timeoutMs: 20_000 });
     if (typeof profile?.home !== "string" || !path.isAbsolute(profile.home)) {
       throw new Error("The subscription account profile is unavailable.");
     }
@@ -1773,7 +1775,7 @@ export function registerIpcHandlers({
       throw new Error("The subscription account profile is not isolated from the primary Codex login.");
     }
     if (pool?.loginAttempts?.[id]?.status === "failed" && pool.loginAttempts[id].retryable === true) {
-      const reset = await runJson(["chatgpt-account-pool", "login-reset", id], { timeoutMs: 20_000 });
+      const reset = await controlJsonRunner(["chatgpt-account-pool", "login-reset", id], { timeoutMs: 20_000 });
       if (reset?.reset !== true) {
         throw new Error("The saved login changed before retry. Refresh the account list and try again.");
       }
@@ -1823,7 +1825,7 @@ export function registerIpcHandlers({
           deadlineAt: Date.now() + CATALOG_MUTATION_TIMEOUT_MS + 30_000,
         });
         try {
-          const finalized = await enqueueMutation(() => runJson(
+          const finalized = await enqueueMutation(() => controlJsonRunner(
             ["chatgpt-account-pool", "login-finalize", id, completionLease],
             { timeoutMs: CATALOG_MUTATION_TIMEOUT_MS },
           ),
@@ -1843,7 +1845,7 @@ export function registerIpcHandlers({
           releaseSubscriptionLogin(id);
         }
       };
-      const openedPromise = openBrowserCommand(codex, ["login"], discoverSourceRoot(), {
+      const openedPromise = chatGptBrowserCommandRunner(codex, ["login"], discoverSourceRoot(), {
           environment: { CODEX_HOME: profileHome },
           openExternal: shell?.openExternal?.bind(shell),
           onSpawn: (child) => {
@@ -1868,7 +1870,10 @@ export function registerIpcHandlers({
       };
     } catch (error) {
       if (loginFinalization) {
-        try { await loginFinalization; } catch {}
+        // Finalization is serialized behind this login action. Waiting for it
+        // here would make the failed action wait on its own queue slot and
+        // strand every later account mutation after an early cancellation.
+        void loginFinalization.catch(() => {});
       } else {
         releaseSubscriptionLogin(id);
         try {
@@ -1887,7 +1892,9 @@ export function registerIpcHandlers({
           });
         } catch {}
       }
-      subscriptionLoginAttempts.delete(id);
+      // Once a child exists, its queued finalizer owns the projected attempt
+      // state and the durable lease. Pre-spawn failures have no such owner.
+      if (!loginFinalization) subscriptionLoginAttempts.delete(id);
       throw error;
     }
   });

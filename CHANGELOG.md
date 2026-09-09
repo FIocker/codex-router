@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Cancelling ChatGPT account sign-in no longer blocks the account menu.** An
+  early browser-login failure now releases its serialized mutation slot before
+  the queued credential finalizer runs, so adding, removing, or switching an
+  account remains available after an aborted OAuth flow.
+
 - **Google Antigravity allowances now appear in Usage.** The router reads the
   provider's non-billable quota-summary endpoint with its managed OAuth
   session, refreshes and retries once after an authorization failure, and

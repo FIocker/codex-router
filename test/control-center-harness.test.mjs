@@ -621,3 +621,89 @@ test("mutation IPC is ordered and continues after a failed action", async () => 
     "end:third",
   ]);
 });
+
+test("cancelled ChatGPT login does not deadlock later account mutations", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "router-chatgpt-login-cancel-"));
+  const primaryHome = path.join(root, "primary");
+  const homesDir = path.join(root, "accounts");
+  const accountId = "acct_cancelled_123456";
+  const accountHome = path.join(homesDir, accountId);
+  const addedAccountId = "acct_added_12345678";
+  const priorCodexHome = process.env.CODEX_HOME;
+  const priorSourceRoot = process.env.CODEX_ROUTER_SOURCE_ROOT;
+  const handlers = new Map();
+  const commands = [];
+  try {
+    await mkdir(primaryHome, { recursive: true });
+    await mkdir(accountHome, { recursive: true });
+    process.env.CODEX_HOME = primaryHome;
+    process.env.CODEX_ROUTER_SOURCE_ROOT = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+    );
+    const account = {
+      id: accountId,
+      label: "Cancelled login",
+      state: "active",
+      subscription: { usable: false },
+    };
+    const lifecycle = registerIpcHandlers({
+      ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+      BrowserWindow: { getAllWindows: () => [] },
+      shell: { openExternal: async () => {} },
+      senderGuard: () => true,
+      chatGptExecutableResolver: () => process.execPath,
+      chatGptBrowserCommandRunner: (_executable, _args, _cwd, { onSpawn, onExit }) => {
+        onSpawn({ pid: process.pid });
+        onExit({ code: 1 });
+        return Promise.reject(new Error("planned login cancellation"));
+      },
+      controlJsonRunner: async (args) => {
+        commands.push(args.slice(0, 2).join(" "));
+        if (args[0] !== "chatgpt-account-pool") throw new Error("unexpected control command");
+        if (args[1] === "status") return { accounts: { [accountId]: account } };
+        if (args[1] === "home") return { home: accountHome };
+        if (args[1] === "login-finalize") return { loginFinalizationPending: false };
+        if (args[1] === "add") {
+          return {
+            account: {
+              id: addedAccountId,
+              label: "After cancellation",
+              state: "active",
+              subscription: { usable: false },
+            },
+          };
+        }
+        throw new Error("unexpected account-pool command");
+      },
+    });
+    const login = handlers.get("router-control:loginChatGptSubscriptionAccount");
+    const add = handlers.get("router-control:addChatGptSubscriptionAccount");
+    const loginResult = login({}, { accountId });
+    const addResult = add({}, { label: "After cancellation" });
+    let timeout;
+    const bounded = (promise) => Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("mutation queue remained blocked")), 2_000);
+      }),
+    ]).finally(() => clearTimeout(timeout));
+
+    await bounded(assert.rejects(loginResult, /planned login cancellation/));
+    assert.equal((await bounded(addResult)).account.id, addedAccountId);
+    await bounded(lifecycle.whenMutationsIdle());
+    assert.equal(lifecycle.hasActiveMutations(), false);
+    assert.deepEqual(commands, [
+      "chatgpt-account-pool status",
+      "chatgpt-account-pool home",
+      "chatgpt-account-pool add",
+      "chatgpt-account-pool login-finalize",
+    ]);
+  } finally {
+    if (priorCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = priorCodexHome;
+    if (priorSourceRoot === undefined) delete process.env.CODEX_ROUTER_SOURCE_ROOT;
+    else process.env.CODEX_ROUTER_SOURCE_ROOT = priorSourceRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});

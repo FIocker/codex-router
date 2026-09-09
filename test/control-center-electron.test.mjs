@@ -1858,7 +1858,7 @@ test("harness and context IPC remain fixed and session-scoped", async () => {
   assert.doesNotMatch(source, /readFileSync\(deepcodeSettings/);
   const chatgptLogin = source.match(/handleAction\("loginChatGptSubscriptionAccount"[\s\S]*?\n  \}\);/)?.[0];
   assert.ok(chatgptLogin, "ChatGPT subscription login handler should be readable");
-  assert.match(chatgptLogin, /openBrowserCommand\(codex, \["login"\]/);
+  assert.match(chatgptLogin, /chatGptBrowserCommandRunner\(codex, \["login"\]/);
   assert.match(chatgptLogin, /\["chatgpt-account-pool", "status"\]/);
   assert.match(chatgptLogin, /\["chatgpt-account-pool", "status"\][\s\S]{0,120}CATALOG_MUTATION_TIMEOUT_MS/);
   assert.match(chatgptLogin, /account\.subscription\?\.usable === true/);
@@ -1869,18 +1869,23 @@ test("harness and context IPC remain fixed and session-scoped", async () => {
   assert.match(chatgptLogin, /attachChatGPTLoginLease/);
   assert.match(chatgptLogin, /clearChatGPTLoginLease/);
   assert.ok(
-    chatgptLogin.indexOf("createChatGPTLoginLease") < chatgptLogin.indexOf("openBrowserCommand"),
+    chatgptLogin.indexOf("createChatGPTLoginLease") < chatgptLogin.indexOf("chatGptBrowserCommandRunner"),
     "durable login ownership must be reserved before the credential writer starts",
   );
   assert.match(chatgptLogin, /"login-finalize", id, completionLease/);
   assert.match(chatgptLogin, /"login-reset", id/);
-  assert.match(chatgptLogin, /enqueueMutation\(\(\) => runJson\([\s\S]*?"login-finalize", id, completionLease/);
+  assert.match(chatgptLogin, /enqueueMutation\(\(\) => controlJsonRunner\([\s\S]*?"login-finalize", id, completionLease/);
   assert.ok(
     chatgptLogin.indexOf("loginFinalization = loginExited.then(processLoginExit)")
       < chatgptLogin.indexOf("const opened = await openedPromise"),
     "every attached credential writer must own finalization before browser handoff settles",
   );
-  assert.match(chatgptLogin, /if \(loginFinalization\) \{[\s\S]*?await loginFinalization/);
+  assert.match(chatgptLogin, /if \(loginFinalization\) \{[\s\S]*?void loginFinalization\.catch/);
+  assert.doesNotMatch(
+    chatgptLogin,
+    /if \(loginFinalization\) \{[\s\S]*?await loginFinalization/,
+    "a failed login must release its mutation slot before queued finalization can run",
+  );
   const chatgptRemove = source.match(/handleAction\("removeChatGptSubscriptionAccount"[\s\S]*?\n  \}\);/)?.[0];
   assert.ok(chatgptRemove, "ChatGPT subscription removal handler should be readable");
   assert.match(chatgptRemove, /"chatgpt-account-pool", "status"/);
@@ -1917,7 +1922,7 @@ test("harness and context IPC remain fixed and session-scoped", async () => {
   assert.match(source, /stdio: \["ignore", "pipe", "pipe"\]/);
   assert.match(source, /openExternal\(match\[0\]\)/);
   assert.match(source, /openExternal: shell\?\.openExternal\?\.bind\(shell\)/);
-  assert.match(source, /const openedPromise = openBrowserCommand\(codex, \["login"\]/);
+  assert.match(source, /const openedPromise = chatGptBrowserCommandRunner\(codex, \["login"\]/);
   assert.match(source, /did not provide an OAuth browser URL/);
   assert.match(source, /surface: "browser"/);
 

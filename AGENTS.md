@@ -1414,6 +1414,18 @@ life of the session, and spawning `pgrep` on that cadence is a cost the check
 does not justify. `apps/macos/ModelRouterTray/Tests/HostProcessDetectionTests.swift`
 guards it.
 
+## ChatGPT account login finalizes after its mutation slot is released
+
+The Control Center serializes account-pool mutations, while a detached Codex
+OAuth child can finish after the IPC action that launched it. Its credential
+finalizer is deliberately queued behind that launch action. If browser handoff
+fails or the user cancels before handoff, the launch action must reject without
+awaiting that queued finalizer; awaiting it makes the action wait on its own
+queue slot and blocks every later add, remove, or switch operation. The child
+finalizer remains the sole owner of the durable login lease and projected login
+attempt once a child has been attached. `test/control-center-harness.test.mjs`
+guards the cancellation followed by another account mutation.
+
 ## The macOS app icon is committed, not built during a tray build
 
 `apps/macos/ModelRouterTray/Resources/AppIcon.svg` is the source and
