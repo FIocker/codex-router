@@ -224,9 +224,21 @@ test("a lifecycle-confirmed stop applies a selection despite a stale desktop lis
   const second = createChatGPTSubscriptionAccount({ filePath, homesDir });
   const firstAuth = JSON.stringify({ tokens: { access_token: "first-token", account_id: "first" } });
   const secondAuth = JSON.stringify({ tokens: { access_token: "second-token", account_id: "second" } });
-  writeFileSync(path.join(primaryHome, "auth.json"), firstAuth, { mode: 0o600 });
+  rawWriteFileSync(path.join(primaryHome, "auth.json"), firstAuth, { mode: 0o644 });
+  assert.equal(privateFileIsProtected(path.join(primaryHome, "auth.json")), false);
   writeFileSync(chatGPTSubscriptionAccountAuthPath(first.id, { homesDir }), firstAuth, { mode: 0o600 });
   writeFileSync(chatGPTSubscriptionAccountAuthPath(second.id, { homesDir }), secondAuth, { mode: 0o600 });
+
+  const whileRunning = await ensureChatGPTProfileAccounts({
+    filePath,
+    homesDir,
+    primaryHome,
+    switchPath,
+    platform: "win32",
+    processList: '"ChatGPT.exe","123","Console","1","42 K"',
+  });
+  assert.equal(whileRunning.currentAccountId, undefined);
+  assert.equal(privateFileIsProtected(path.join(primaryHome, "auth.json")), false);
 
   const selected = await selectChatGPTProfileAccount(second.id, {
     filePath,
@@ -243,6 +255,7 @@ test("a lifecycle-confirmed stop applies a selection despite a stale desktop lis
   assert.equal(selected.profile.pending, false);
   assert.equal(selected.pool.policy.selectedAccountId, second.id);
   assert.equal(readFileSync(path.join(primaryHome, "auth.json"), "utf8"), secondAuth);
+  assert.equal(privateFileIsProtected(path.join(primaryHome, "auth.json")), true);
 });
 
 test("a target auth rewrite during switching rolls back instead of installing another identity", async () => {

@@ -763,6 +763,18 @@ function ensureProfileAccountLocked(options = {}) {
     primaryHome = CODEX_HOME,
     switchPath = CHATGPT_PROFILE_SWITCH_PATH,
   } = options;
+  const primary = primaryAuthPath(primaryHome);
+  if (
+    existsSync(primary)
+    && !privateFileIsProtected(primary)
+    && (options.desktopStoppedByLifecycle === true || !codexDesktopRunning(options))
+  ) {
+    ensureAuthFile(primary, "The active");
+    protectPrivateFile(primary);
+    if (!privateFileIsProtected(primary)) {
+      throw new Error("The active ChatGPT login profile could not be made owner-only.");
+    }
+  }
   let state = readChatGPTAccountPoolState(filePath);
   const leasedAccountIds = new Set(Object.keys(state.accounts).filter((id) => (
     chatGPTLoginLeaseStatus(id, {
@@ -773,7 +785,7 @@ function ensureProfileAccountLocked(options = {}) {
     }).active
   )));
   const sources = [
-    primaryAuthPath(primaryHome),
+    primary,
     backupAuthPath(switchPath),
   ];
   let currentAccountId;
@@ -805,7 +817,7 @@ function ensureProfileAccountLocked(options = {}) {
         state = readChatGPTAccountPoolState(filePath);
       }
     }
-    if (source === primaryAuthPath(primaryHome)) currentAccountId = id;
+    if (source === primary) currentAccountId = id;
   }
   let identitiesChanged = false;
   const seenIdentities = new Map();
@@ -1118,7 +1130,13 @@ async function applyLocked(selection, options) {
     primaryHome = CODEX_HOME,
     switchPath = CHATGPT_PROFILE_SWITCH_PATH,
   } = options;
-  const migration = ensureProfileAccountLocked({ filePath, homesDir, primaryHome, switchPath });
+  const migration = ensureProfileAccountLocked({
+    ...options,
+    filePath,
+    homesDir,
+    primaryHome,
+    switchPath,
+  });
   const current = readChatGPTProfileSwitchState(switchPath);
   const active = current.active || migration.currentAccountId;
   const targetSelection = selection === LEGACY_PRIMARY ? migration.currentAccountId : selection;
