@@ -333,6 +333,10 @@ export default function App() {
 
   useEffect(() => api?.onOperation?.((event) => setOperation(event)), [api]);
 
+  useEffect(() => api?.onChatGptAccountPoolChanged?.(() => {
+    void refreshAll();
+  }), [api, refreshAll]);
+
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 4_000);

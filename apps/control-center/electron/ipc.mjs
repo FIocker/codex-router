@@ -1271,6 +1271,7 @@ export function registerIpcHandlers({
   cursorAppPath = cursorDesktopPath,
   openclawAppPath = openclawDesktopPath,
   senderGuard = () => true,
+  onChatGptAccountPoolChanged = () => {},
 } = {}) {
   if (!ipcMain?.handle) throw new TypeError("ipcMain.handle is required.");
   const operations = new Map();
@@ -1731,7 +1732,12 @@ export function registerIpcHandlers({
     // switch or login finalization holds that lock, control.mjs reports the
     // contention after ten seconds instead of leaving an optimistic row behind
     // a minute-long subprocess followed by a long reconciliation read.
-    return controlJsonRunner(["chatgpt-account-pool", "add", label.trim()], { timeoutMs: 20_000 });
+    const result = await controlJsonRunner(
+      ["chatgpt-account-pool", "add", label.trim()],
+      { timeoutMs: 20_000 },
+    );
+    onChatGptAccountPoolChanged();
+    return result;
   });
   handleAction("loginChatGptSubscriptionAccount", async ({ accountId } = {}) => {
     const id = stringValue(accountId, "Account id", CHATGPT_ACCOUNT_ID);
@@ -1834,6 +1840,7 @@ export function registerIpcHandlers({
           if (latest && finalized?.loginFinalizationPending !== true) {
             subscriptionLoginAttempts.set(id, { ...latest, status: "finished" });
           }
+          onChatGptAccountPoolChanged();
         } catch (error) {
           const latest = subscriptionLoginAttempts.get(id);
           if (latest) subscriptionLoginAttempts.set(id, {
@@ -1913,7 +1920,9 @@ export function registerIpcHandlers({
         throw new Error("The saved login changed before removal. Refresh the account list and try again.");
       }
     }
-    return runJson(["chatgpt-account-pool", "remove", id], { timeoutMs: 60_000 });
+    const result = await runJson(["chatgpt-account-pool", "remove", id], { timeoutMs: 60_000 });
+    onChatGptAccountPoolChanged();
+    return result;
   });
   handleAction("setChatGptAccountAutoRestart", async ({ enabled } = {}) => {
     if (typeof enabled !== "boolean") throw new Error("enabled must be boolean.");
@@ -1923,10 +1932,12 @@ export function registerIpcHandlers({
     );
   });
   handleAction("setChatGptAccountSelection", async ({ selection } = {}) => {
-    return runJson(
+    const result = await runJson(
       ["chatgpt-account-pool", "select", stringValue(selection, "Account selection", CHATGPT_ACCOUNT_ID)],
       { timeoutMs: CATALOG_MUTATION_TIMEOUT_MS },
     );
+    onChatGptAccountPoolChanged();
+    return result;
   });
   handleAction("setPresence", async ({ mode } = {}) => runJson(["presence", "set", oneOf(mode, PRESENCE_MODES, "Presence mode")]));
   handleAction("controlService", async ({ action = "status" } = {}) => {

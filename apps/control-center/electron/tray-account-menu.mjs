@@ -1,5 +1,8 @@
 function accountLabel(account) {
-  return account?.label || account?.identity?.email || "ChatGPT account";
+  return account?.subscription?.email
+    || account?.label
+    || account?.identity?.email
+    || "ChatGPT account";
 }
 
 function orderedAccounts(snapshot) {

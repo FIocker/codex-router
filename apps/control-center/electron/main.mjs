@@ -34,6 +34,7 @@ let mainWindow;
 let tray;
 let trayAccountSnapshot;
 let trayAccountBusy = false;
+let refreshTrayAccountMenu = async () => {};
 let mutationLifecycle = {
   hasActiveMutations: () => false,
   whenMutationsIdle: () => Promise.resolve(),
@@ -259,6 +260,11 @@ function showWindow() {
   revealWindow();
 }
 
+function notifyRendererAccountPoolChanged() {
+  if (!mainWindow || mainWindow.isDestroyed() || !windowContentReady) return;
+  mainWindow.webContents.send("router-control:chatgpt-account-pool-changed");
+}
+
 const openRequests = createOpenRequestGate(showWindow);
 
 function completeApplicationReadiness() {
@@ -295,6 +301,7 @@ function createTray() {
         updateTrayMenu();
       }
     };
+    refreshTrayAccountMenu = refreshAccountMenu;
     const switchAccount = async (accountId) => {
       if (trayAccountBusy) return;
       trayAccountBusy = true;
@@ -304,6 +311,7 @@ function createTray() {
           ["chatgpt-account-pool", "select", accountId],
           { timeoutMs: ACCOUNT_SWITCH_TIMEOUT_MS },
         );
+        notifyRendererAccountPoolChanged();
       } catch (error) {
         showAccountError(error);
       } finally {
@@ -430,6 +438,7 @@ if (primaryInstance && !quitForUpdateInvocation) {
       BrowserWindow,
       shell,
       senderGuard: trustedRendererSender,
+      onChatGptAccountPoolChanged: () => { void refreshTrayAccountMenu(); },
     });
     ipcMain.on("router-control:navigation-ready", (event) => {
       if (!trustedRendererSender(event)) return;

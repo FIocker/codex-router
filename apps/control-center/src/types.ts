@@ -816,6 +816,7 @@ export interface RouterControlApi {
     sourceId?: string;
   }) => void): () => void;
   onOperation?(listener: (event: OperationEvent) => void): () => void;
+  onChatGptAccountPoolChanged?(listener: () => void): () => void;
 }
 
 declare global {

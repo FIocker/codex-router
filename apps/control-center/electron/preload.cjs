@@ -88,6 +88,12 @@ const routerControl = Object.freeze({
     ipcRenderer.on("router-control:operation", wrapped);
     return () => ipcRenderer.removeListener("router-control:operation", wrapped);
   },
+  onChatGptAccountPoolChanged(listener) {
+    if (typeof listener !== "function") throw new TypeError("Account pool listener must be a function.");
+    const wrapped = () => listener();
+    ipcRenderer.on("router-control:chatgpt-account-pool-changed", wrapped);
+    return () => ipcRenderer.removeListener("router-control:chatgpt-account-pool-changed", wrapped);
+  },
 });
 
 contextBridge.exposeInMainWorld("routerControl", routerControl);

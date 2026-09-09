@@ -15,6 +15,7 @@ const bridgeSource = String.raw`
   const calls = [];
   let navigationListener;
   let operationListener;
+  let accountPoolChangedListener;
   const searchParams = new URLSearchParams(location.search);
   let usageDelayMs = Number(searchParams.get("usageDelayMs")) || 0;
   let cursorHarnessState = "configured";
@@ -506,10 +507,21 @@ const bridgeSource = String.raw`
       operationListener = listener;
       return () => { if (operationListener === listener) operationListener = undefined; };
     },
+    onChatGptAccountPoolChanged: (listener) => {
+      accountPoolChangedListener = listener;
+      return () => { if (accountPoolChangedListener === listener) accountPoolChangedListener = undefined; };
+    },
   });
   window.routerControlTest = Object.freeze({
     calls: () => calls.map((call) => ({ name: call.name, args: call.args })),
     navigationReady: () => Boolean(navigationListener),
+    accountPoolChangeReady: () => Boolean(accountPoolChangedListener),
+    accountPoolReads: () => accountPoolReads,
+    accountPoolChanged: () => {
+      if (!accountPoolChangedListener) return false;
+      accountPoolChangedListener();
+      return true;
+    },
     navigate: (destination) => {
       if (!navigationListener) return false;
       navigationListener(destination);
@@ -624,6 +636,10 @@ test("the production renderer exposes model discovery and picker actions", { tim
     assert.equal((await wordmark.locator("strong").innerText()).trim(), "Codex Router");
     assert.equal(await wordmark.locator("img").count(), 0);
     await page.waitForFunction(() => window.routerControlTest.navigationReady());
+    await page.waitForFunction(() => window.routerControlTest.accountPoolChangeReady());
+    const accountPoolReads = await page.evaluate(() => window.routerControlTest.accountPoolReads());
+    assert.equal(await page.evaluate(() => window.routerControlTest.accountPoolChanged()), true);
+    await page.waitForFunction((reads) => window.routerControlTest.accountPoolReads() > reads, accountPoolReads);
     await page.evaluate(() => window.routerControlTest.setUsageDelay(600));
     assert.equal(
       await page.evaluate(() => window.routerControlTest.navigate({ destination: "usage", sourceId: "deepseek" })),

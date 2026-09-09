@@ -21,6 +21,22 @@ test("the account tray orders profiles, marks the active one, and dispatches swi
   assert.deepEqual(switched, ["second"]);
 });
 
+test("the account tray uses the same email-first account name as the Control Center", () => {
+  const menu = chatGptAccountTrayTemplate({
+    accounts: {
+      saved: {
+        id: "saved",
+        label: "ChatGPT account 1",
+        state: "active",
+        subscription: { email: "personal@example.com", usable: true },
+      },
+    },
+    profile: { active: "saved", pending: false },
+  });
+
+  assert.equal(menu.submenu[0].label, "personal@example.com");
+});
+
 test("the account tray renders empty, pending, and busy states without unsafe actions", () => {
   const empty = chatGptAccountTrayTemplate({ accounts: {}, profile: {} });
   assert.deepEqual(empty.submenu[0], { label: "No saved accounts", enabled: false });

@@ -211,4 +211,5 @@ export interface RouterControl {
     sourceId?: string;
   }) => void): () => void;
   onOperation(listener: (event: { id?: string; name?: string; action?: string; status: string; message?: string; error?: string }) => void): () => void;
+  onChatGptAccountPoolChanged?(listener: () => void): () => void;
 }

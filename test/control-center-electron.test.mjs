@@ -1125,6 +1125,10 @@ test("electron boundary does not enable node integration or shell argv", async (
   assert.match(main, /new Tray\(/);
   assert.match(main, /createdTray\.on\("click", showWindow\)/);
   assert.match(main, /Open Control Center/);
+  assert.match(main, /notifyRendererAccountPoolChanged\(\)[\s\S]*router-control:chatgpt-account-pool-changed/);
+  assert.match(main, /onChatGptAccountPoolChanged: \(\) => \{ void refreshTrayAccountMenu\(\); \}/);
+  assert.match(ipc, /onChatGptAccountPoolChanged = \(\) => \{\}/);
+  assert.match(ipc, /handleAction\("setChatGptAccountSelection"[\s\S]{0,400}onChatGptAccountPoolChanged\(\)/);
   assert.match(main, /CODEX_ROUTER_EMBEDDED_CONTROL_CENTER/);
   assert.match(main, /image\.isEmpty\(\)[\s\S]*tray icon could not be loaded/);
   assert.match(main, /const trayAvailable = trayIsAvailable\(\)/);
@@ -1317,8 +1321,8 @@ test("preload constructs exact positional IPC payloads", async () => {
         },
         ipcRenderer: {
           invoke: async (channel, input) => { calls.push([channel, input]); },
-          on() {},
-          removeListener() {},
+          on(channel, listener) { calls.push(["on", channel, listener]); },
+          removeListener(channel, listener) { calls.push(["removeListener", channel, listener]); },
         },
       };
     },
@@ -1380,6 +1384,17 @@ test("preload constructs exact positional IPC payloads", async () => {
       method,
     );
   }
+  assert.equal(calls.length, 0);
+
+  let accountPoolChanged = 0;
+  const unsubscribe = api.onChatGptAccountPoolChanged(() => { accountPoolChanged += 1; });
+  const registered = calls.shift();
+  assert.equal(registered[0], "on");
+  assert.equal(registered[1], "router-control:chatgpt-account-pool-changed");
+  registered[2]();
+  assert.equal(accountPoolChanged, 1);
+  unsubscribe();
+  assert.deepEqual(calls.shift(), ["removeListener", registered[1], registered[2]]);
   assert.equal(calls.length, 0);
 });
 
