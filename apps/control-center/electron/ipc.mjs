@@ -1725,7 +1725,11 @@ export function registerIpcHandlers({
     if (typeof label !== "string" || label.length > 120 || /[\u0000]/.test(label)) {
       throw new Error("Account label is invalid.");
     }
-    return runJson(["chatgpt-account-pool", "add", label.trim()], { timeoutMs: 60_000 });
+    // Account creation owns only a short pool-state transaction. If a profile
+    // switch or login finalization holds that lock, control.mjs reports the
+    // contention after ten seconds instead of leaving an optimistic row behind
+    // a minute-long subprocess followed by a long reconciliation read.
+    return runJson(["chatgpt-account-pool", "add", label.trim()], { timeoutMs: 20_000 });
   });
   handleAction("loginChatGptSubscriptionAccount", async ({ accountId } = {}) => {
     const id = stringValue(accountId, "Account id", CHATGPT_ACCOUNT_ID);

@@ -690,10 +690,15 @@ so the unit of evidence is always the slug, never the model name.
    Codex collaboration: tool calls work, encrypted subagent payload relay works
    without disclosure, a marker-return spawn succeeds, and a same-thread
    follow-up succeeds. Otherwise omit it and retain conservative v1 behavior.
-5. Remember that Codex advertises only a small priority-ordered subset of native
-   spawn-model overrides. Adjust priority intentionally and keep the desired
-   Kimi/Grok/GPT choices in that visible subset; do not crowd them out
-   accidentally when adding a model.
+5. This private build deliberately gives the visible Codex picker strict,
+   unique provider bands: native OpenAI first, then Antigravity/Gemini,
+   DeepSeek, opencode Go/Zen, and every remaining provider in deterministic
+   order. Apply that numbering to certified v2 routes as well; preserving their
+   low authored priority is the upstream compromise that makes the main picker
+   interleave providers again. Keep `multi_agent_version` and the router's
+   managed agent definitions intact so the priority rewrite changes picker
+   placement, not collaboration eligibility. Preserve this policy across
+   upstream rebases.
 6. Add registry, catalog, routing/request-profile, and failure-path regression
    tests. Run `npm run check` and `npm test`. With explicit quota approval, run
    `./bin/test-model 'provider/model' --live --yes`, reinstall, fully restart

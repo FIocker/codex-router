@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync as rawWriteFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, symlinkSync, writeFileSync as rawWriteFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,6 +17,7 @@ import {
   chatGPTSubscriptionAccountPoolSnapshot,
   chatGPTSubscriptionAccountStatus,
   createChatGPTSubscriptionAccount,
+  createLockedChatGPTSubscriptionAccount,
   readChatGPTAccountPoolState,
   refreshChatGPTSubscriptionAccount,
   refreshBoundedChatGPTSubscriptionAccounts,
@@ -201,6 +202,93 @@ test("account state writes are serialized across concurrent operations", async (
   ]);
   const selected = readChatGPTAccountPoolState(options.filePath).policy.selectedAccountId;
   assert.ok(selected === first.id || selected === second.id);
+});
+
+test("locked account creation succeeds repeatedly without leaving its lock behind", async () => {
+  const options = fixture();
+  const first = await createLockedChatGPTSubscriptionAccount({ ...options, label: "Personal" });
+  const second = await createLockedChatGPTSubscriptionAccount({ ...options, label: "Work" });
+  assert.deepEqual(
+    [first.label, second.label],
+    ["Personal", "Work"],
+  );
+  assert.equal(Object.keys(readChatGPTAccountPoolState(options.filePath).accounts).length, 2);
+  assert.equal(existsSync(`${options.filePath}.pool-lock.lock`), false);
+});
+
+test("account creation reports a busy profile lock after its bounded wait", async () => {
+  const options = fixture();
+  let releaseHolder;
+  const holderReady = new Promise((resolve) => { releaseHolder = resolve; });
+  let acquired;
+  const acquiredPromise = new Promise((resolve) => { acquired = resolve; });
+  const holder = withChatGPTAccountPoolLock(async () => {
+    acquired();
+    await holderReady;
+  }, options);
+  await acquiredPromise;
+  try {
+    await assert.rejects(
+      createLockedChatGPTSubscriptionAccount({
+        ...options,
+        label: "Work",
+        waitMs: 30,
+        retryMs: 5,
+      }),
+      /Another ChatGPT account operation is still finishing/,
+    );
+    assert.equal(existsSync(options.filePath), false);
+  } finally {
+    releaseHolder();
+    await holder;
+  }
+});
+
+test("a transient proper-lockfile release failure removes only the owned empty lock", async () => {
+  const options = fixture();
+  const lockPath = `${options.filePath}.pool-lock.lock`;
+  const value = await withChatGPTAccountPoolLock(
+    () => "saved",
+    {
+      ...options,
+      lockImpl: async () => {
+        mkdirSync(lockPath);
+        return async () => {
+          const error = new Error("transient rmdir failure");
+          error.code = "EPERM";
+          throw error;
+        };
+      },
+    },
+  );
+  assert.equal(value, "saved");
+  assert.equal(existsSync(lockPath), false);
+});
+
+test("release recovery never removes a replacement account lock", async () => {
+  const options = fixture();
+  const lockPath = `${options.filePath}.pool-lock.lock`;
+  await assert.rejects(
+    withChatGPTAccountPoolLock(
+      () => "saved",
+      {
+        ...options,
+        lockImpl: async () => {
+          mkdirSync(lockPath);
+          return async () => {
+            rmdirSync(lockPath);
+            mkdirSync(lockPath);
+            const error = new Error("late release failure");
+            error.code = "EPERM";
+            throw error;
+          };
+        },
+      },
+    ),
+    /lock could not be released/,
+  );
+  assert.equal(existsSync(lockPath), true);
+  rmdirSync(lockPath);
 });
 
 test("refresh attempt claims serialize across processes and preserve the retry window", async () => {

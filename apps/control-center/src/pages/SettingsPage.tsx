@@ -211,9 +211,21 @@ export function SettingsPage({ target, health, presence, chatgptSession, account
     let saved = false;
     try {
       await runAction("Add ChatGPT subscription account", async () => {
-        const result = await api.addChatGptSubscriptionAccount(label) as {
-          account?: ChatGptSubscriptionAccount;
-        };
+        let result: { account?: ChatGptSubscriptionAccount };
+        try {
+          result = await api.addChatGptSubscriptionAccount(label) as {
+            account?: ChatGptSubscriptionAccount;
+          };
+        } catch (error) {
+          // runAction reconciles failed mutations before it settles. Account
+          // status can itself wait behind the same profile lock, so remove the
+          // purely local placeholder before handing the failure to that slower
+          // recovery path.
+          setAccountOverlays((current) => current.filter((entry) => !(
+            entry.kind === "add" && entry.clientId === clientId
+          )));
+          throw error;
+        }
         const created = result?.account;
         if (created?.id) {
           setAccountOverlays((current) => current.map((entry) => (

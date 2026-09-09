@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **ChatGPT account creation no longer sits indefinitely on an optimistic row.**
+  A new account now reports lock contention after a bounded wait, the Control
+  Center removes its local "Saving account" row before slower reconciliation,
+  and a transient Windows lock-release failure gets a guarded retry instead of
+  silently stranding later account operations.
+
+- **The Codex model picker once again uses strict provider bands.** Native
+  OpenAI models publish first, followed by Antigravity/Gemini, DeepSeek,
+  opencode Go/Zen, and the remaining providers. Every visible routed model,
+  including certified v2 routes, receives a unique picker priority while its
+  capability metadata and registry priority remain unchanged.
+
 - **ChatGPT account selection can now restart the desktop app automatically.**
   Control Center exposes a persisted, default-off toggle. When enabled, selecting
   an account closes a running verified ChatGPT desktop process tree, applies the

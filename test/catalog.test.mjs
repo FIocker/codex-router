@@ -545,12 +545,9 @@ test("merged catalog gives native models first and keeps routed providers contig
   ];
   const merged = buildMergedCatalog({ models: [nativeOlder, template] }, routed);
 
-  // Routed models stay grouped by the named vendor policy. Every routed entry
-  // in this fixture inherits `multiAgentVersion: "v2"` from `grok`, and a
-  // certified v2 spawn route keeps the `priority` the operator chose: those
-  // low values are what keep it inside Codex's spawn_agent override window,
-  // so publication must never renumber them. The band that v1 routed models
-  // do move into is covered by the next test.
+  // Every routed entry in this fixture inherits `multiAgentVersion: "v2"`
+  // from `grok`. Capability metadata stays v2 while picker-facing priorities
+  // form strict native, Antigravity, DeepSeek, opencode, and fallback bands.
   assert.deepEqual(merged.map((model) => model.slug), [
     "gpt-5.5",
     "gpt-5.4",
@@ -564,15 +561,14 @@ test("merged catalog gives native models first and keeps routed providers contig
   ]);
   assert.deepEqual(
     merged.map((model) => model.priority),
-    [10, 29, 3, 9, 1, 2, 4, 7, 0],
+    [10, 29, 30, 31, 32, 33, 34, 35, 36],
   );
+  assert.equal(merged.find((model) => model.slug === "antigravity-oauth/gemini-3.1-pro").multi_agent_version, "v2");
 });
 
-test("v1 routed models publish in a band above the visible native maximum while v2 routes keep their authored priority", () => {
-  // Issue #544: Codex sorts its picker by `priority`, so routed models that
-  // reuse the native GPT integers interleave with them and vendor grouping
-  // never appears. Renumbering everything would crowd certified v2 spawn
-  // routes out of Codex's override window, so only v1 routes move.
+test("all routed models publish in strict provider bands above the visible native maximum", () => {
+  // Codex sorts its picker by `priority`, so every visible routed model needs
+  // a unique number in the provider band even when it is certified v2.
   const nativeOlder = { ...template, slug: "gpt-5.4", display_name: "GPT-5.4", priority: 29 };
   // A hidden native entry may carry any number; it must not set the band.
   const hiddenNative = {
@@ -601,22 +597,23 @@ test("v1 routed models publish in a band above the visible native maximum while 
   assert.equal(bySlug.get("gpt-5.4").priority, 29);
   assert.equal(bySlug.get("gpt-5.3-internal").priority, 500);
 
-  // The certified v2 route keeps its authored priority and its certificate,
-  // and does not consume a slot in the band.
-  assert.equal(bySlug.get("grok-oauth/grok-4.5").priority, 2);
+  // The certified v2 route is renumbered for the picker but keeps its
+  // collaboration certificate.
+  assert.equal(bySlug.get("grok-oauth/grok-4.5").priority, 34);
   assert.equal(bySlug.get("grok-oauth/grok-4.5").multi_agent_version, "v2");
 
-  // v1 routes land directly above the highest *visible* native (29, not the
-  // hidden 500), in vendor-group order and then authored order within a
-  // vendor: DeepSeek (pro 1, flash 6), then opencode, then the catch-all.
+  // Routed entries land directly above the highest *visible* native (29, not
+  // the hidden 500), in provider order and then authored order within each
+  // provider: DeepSeek, opencode, then the Grok fallback group.
   assert.deepEqual(
     [
       "deepseek/deepseek-v4-pro",
       "deepseek/deepseek-v4-flash",
       "opencode-go/glm-5.3",
       "grok-oauth/grok-4.6",
+      "grok-oauth/grok-4.5",
     ].map((slug) => bySlug.get(slug).priority),
-    [30, 31, 32, 33],
+    [30, 31, 32, 33, 34],
   );
 
   // The published picker has no colliding integers left to interleave on.

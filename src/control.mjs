@@ -3122,10 +3122,9 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
   const {
     chatGPTSubscriptionAccountHome,
     chatGPTSubscriptionAccountPoolSnapshot,
-    createChatGPTSubscriptionAccount,
+    createLockedChatGPTSubscriptionAccount,
     readChatGPTAccountPoolState,
     refreshBoundedChatGPTSubscriptionAccounts,
-    withChatGPTAccountPoolLock,
   } = await import("./chatgpt-account-pool.mjs");
   const {
     chatGPTProfileSwitchSnapshot,
@@ -3203,9 +3202,7 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
     return;
   }
   if (action === "add") {
-    const account = await withChatGPTAccountPoolLock(
-      () => createChatGPTSubscriptionAccount({ label: value }),
-    );
+    const account = await createLockedChatGPTSubscriptionAccount({ label: value });
     process.stdout.write(`${JSON.stringify({ account, loginRequired: true })}\n`);
     return;
   }

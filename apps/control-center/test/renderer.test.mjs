@@ -30,6 +30,8 @@ const bridgeSource = String.raw`
   const rejectAccountUsageRead = Number(searchParams.get("rejectAccountUsageRead")) || 0;
   const rejectAccountPool = searchParams.get("rejectAccountPool") === "1";
   const accountMutationDelayMs = Number(searchParams.get("accountMutationDelayMs")) || 0;
+  const rejectAccountAdd = searchParams.get("rejectAccountAdd") === "1";
+  const accountFailureRefreshDelayMs = Number(searchParams.get("accountFailureRefreshDelayMs")) || 0;
   const terminalLoginFailure = searchParams.get("terminalLoginFailure") === "1";
   const rejectLoginImmediately = searchParams.get("rejectLoginImmediately") === "1";
   const loginStaysPending = searchParams.get("loginStaysPending") === "1";
@@ -206,6 +208,7 @@ const bridgeSource = String.raw`
   };
 
   let accountSeq = 0;
+  let accountAddRejected = false;
   const accountPoolState = {
     version: 1,
     policy: { enabled: true, mode: "switch", selectedAccountId: "active" },
@@ -235,6 +238,9 @@ const bridgeSource = String.raw`
       if (rejectAccountPool) throw new Error("The saved ChatGPT account list could not be read as JSON.");
       accountPoolReads += 1;
       if (terminalLoginFailure) record("getChatGptAccountPool", accountPoolReads);
+      if (accountAddRejected && accountFailureRefreshDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, accountFailureRefreshDelayMs));
+      }
       return JSON.parse(JSON.stringify(accountPoolState));
     },
     getProviders: async () => {
@@ -453,6 +459,10 @@ const bridgeSource = String.raw`
     addChatGptSubscriptionAccount: async (label = "") => {
       record("addChatGptSubscriptionAccount", label);
       if (accountMutationDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, accountMutationDelayMs));
+      if (rejectAccountAdd) {
+        accountAddRejected = true;
+        throw new Error("Another ChatGPT account operation is still finishing.");
+      }
       accountSeq += 1;
       const id = "acct_test_" + String(accountSeq).padStart(8, "0");
       const account = {
@@ -926,6 +936,27 @@ test("the production renderer exposes model discovery and picker actions", { tim
     await optimisticPage.waitForFunction(() => window.routerControlTest.calls()
       .some((call) => call.name === "removeChatGptSubscriptionAccount"));
     await optimisticPage.close();
+
+    // A failed add must remove its local placeholder before runAction's
+    // authoritative refresh settles. Account status can be waiting behind the
+    // same profile lock that rejected creation, so tying cleanup to that read
+    // recreates the indefinitely stuck "Saving account" row.
+    const rejectedAddPage = await newEnglishTestPage(browser, { viewport: { width: 1280, height: 840 } });
+    rejectedAddPage.setDefaultTimeout(10_000);
+    await rejectedAddPage.goto(
+      `${url}?accountMutationDelayMs=100&rejectAccountAdd=1&accountFailureRefreshDelayMs=3000`,
+      { waitUntil: "domcontentloaded" },
+    );
+    await rejectedAddPage.getByRole("button", { name: "Settings", exact: true }).click();
+    await rejectedAddPage.getByText("ChatGPT accounts", { exact: true }).waitFor();
+    await rejectedAddPage.getByRole("textbox", { name: "New ChatGPT account label" }).fill("Blocked Work");
+    const rejectedAdd = rejectedAddPage.locator(".subscription-account-row").filter({ hasText: "Blocked Work" });
+    await rejectedAddPage.getByRole("button", { name: "Add account", exact: true }).click();
+    await rejectedAdd.waitFor();
+    const rejectedAt = Date.now();
+    await rejectedAdd.waitFor({ state: "detached", timeout: 1_500 });
+    assert.ok(Date.now() - rejectedAt < 1_500, "failed add placeholder must not wait for account refresh");
+    await rejectedAddPage.close();
 
     // Huge community GGUFs stay guarded, but the explicit oversized-model
     // acknowledgement must make their exact Ollama tag selectable. Otherwise

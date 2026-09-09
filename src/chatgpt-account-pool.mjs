@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 
@@ -31,6 +31,7 @@ const ACCOUNT_REFRESH_MARGIN_MS = 24 * 60 * 60 * 1000;
 export const ACCOUNT_REFRESH_RETRY_MS = 5 * 60 * 1000;
 export const ACCOUNT_REFRESH_POLL_LIMIT = 8;
 export const ACCOUNT_REFRESH_POLL_CONCURRENCY = 2;
+export const ACCOUNT_CREATE_LOCK_WAIT_MS = 10_000;
 const ACCOUNT_REFRESH_TIMEOUT_MS = 30_000;
 
 function terminateRefreshProcessTree(child, {
@@ -694,15 +695,95 @@ export function sanitizeChatGPTAccountPool(state) {
     accounts: Object.fromEntries(Object.entries(normalized.accounts).map(([id, account]) => [id, sanitizeChatGPTAccount(account)])), sessions: {},
   };
 }
-export async function withChatGPTAccountPoolLock(operation, { filePath = CHATGPT_ACCOUNT_POOL_PATH, waitMs = 120_000, retryMs = 25, staleMs = 10 * 60_000 } = {}) {
+
+function sameFileIdentity(left, right) {
+  return Boolean(left && right)
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.birthtimeMs === right.birthtimeMs;
+}
+
+async function releaseChatGPTAccountPoolLock(release, lockPath, ownedLock) {
+  try {
+    await release();
+    return;
+  } catch (releaseError) {
+    // proper-lockfile marks its in-memory lease released before removing the
+    // lock directory. A transient Windows rmdir failure therefore cannot be
+    // retried through release(), and silently ignoring it strands every later
+    // account operation behind a lock that no process owns. Remove only the
+    // exact empty directory acquired by this process; an identity change means
+    // another process owns the name and must never be disturbed.
+    let cleanupError;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const current = lstatSync(lockPath);
+        if (
+          current.isSymbolicLink()
+          || !current.isDirectory()
+          || !sameFileIdentity(current, ownedLock)
+          || readdirSync(lockPath).length !== 0
+        ) {
+          throw new Error("The ChatGPT account lock changed before cleanup.");
+        }
+        rmdirSync(lockPath);
+        return;
+      } catch (error) {
+        if (error?.code === "ENOENT") return;
+        cleanupError = error;
+        if (String(error?.message || "").includes("changed before cleanup")) break;
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    throw new AggregateError(
+      [releaseError, cleanupError].filter(Boolean),
+      "The ChatGPT account operation completed, but its lock could not be released.",
+    );
+  }
+}
+
+export async function withChatGPTAccountPoolLock(operation, {
+  filePath = CHATGPT_ACCOUNT_POOL_PATH,
+  waitMs = 120_000,
+  retryMs = 25,
+  staleMs = 10 * 60_000,
+  lockImpl = lockfile.lock,
+} = {}) {
   assertAccountDiscoveryEnabled();
   const lockTarget = `${filePath}.pool-lock`;
   const lockPath = `${lockTarget}.lock`;
   const retries = Math.max(0, Math.ceil(waitMs / retryMs) - 1);
   mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
   let release;
+  let ownedLock;
   try {
-    release = await lockfile.lock(lockTarget, { realpath: false, lockfilePath: lockPath, stale: Math.max(2_000, staleMs), retries: { retries, factor: 1, minTimeout: retryMs, maxTimeout: retryMs, randomize: false } });
+    release = await lockImpl(lockTarget, { realpath: false, lockfilePath: lockPath, stale: Math.max(2_000, staleMs), retries: { retries, factor: 1, minTimeout: retryMs, maxTimeout: retryMs, randomize: false } });
+    ownedLock = lstatSync(lockPath);
     return await operation();
-  } finally { if (release) await release().catch(() => {}); }
+  } finally {
+    if (release) await releaseChatGPTAccountPoolLock(release, lockPath, ownedLock);
+  }
+}
+
+export async function createLockedChatGPTSubscriptionAccount({
+  label = "",
+  filePath = CHATGPT_ACCOUNT_POOL_PATH,
+  waitMs = ACCOUNT_CREATE_LOCK_WAIT_MS,
+  retryMs = 25,
+  ...options
+} = {}) {
+  try {
+    return await withChatGPTAccountPoolLock(
+      () => createChatGPTSubscriptionAccount({ ...options, filePath, label }),
+      { filePath, waitMs, retryMs },
+    );
+  } catch (error) {
+    if (error?.code === "ELOCKED") {
+      throw new Error(
+        "Another ChatGPT account operation is still finishing. Wait a moment, then add the account again.",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }
