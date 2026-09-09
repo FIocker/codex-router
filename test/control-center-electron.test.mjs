@@ -1918,6 +1918,9 @@ test("harness and context IPC remain fixed and session-scoped", async () => {
   assert.ok(chatgptAutoRestart, "ChatGPT account auto-restart handler should be readable");
   assert.match(chatgptAutoRestart, /typeof enabled !== "boolean"/);
   assert.match(chatgptAutoRestart, /"chatgpt-account-pool", "auto-restart", enabled \? "on" : "off"/);
+  const chatgptSelection = source.match(/handleAction\("setChatGptAccountSelection"[\s\S]*?\n  \}\);/)?.[0];
+  assert.ok(chatgptSelection, "ChatGPT account selection handler should be readable");
+  assert.match(chatgptSelection, /timeoutMs: CATALOG_MUTATION_TIMEOUT_MS/);
   assert.match(source, /const CHATGPT_LOGIN_URL/);
   assert.match(source, /stdio: \["ignore", "pipe", "pipe"\]/);
   assert.match(source, /openExternal\(match\[0\]\)/);

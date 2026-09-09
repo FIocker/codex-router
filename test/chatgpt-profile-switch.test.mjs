@@ -213,6 +213,38 @@ test("a selected profile waits for Codex to close and preserves both account pro
   assert.equal(autoApplied.active, second.id);
 });
 
+test("a lifecycle-confirmed stop applies a selection despite a stale desktop listing", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "codex-profile-lifecycle-stop-"));
+  const primaryHome = path.join(root, "primary");
+  const homesDir = path.join(root, "accounts");
+  const filePath = path.join(root, "pool.json");
+  const switchPath = path.join(root, "switch.json");
+  mkdirSync(primaryHome, { recursive: true });
+  const first = createChatGPTSubscriptionAccount({ filePath, homesDir });
+  const second = createChatGPTSubscriptionAccount({ filePath, homesDir });
+  const firstAuth = JSON.stringify({ tokens: { access_token: "first-token", account_id: "first" } });
+  const secondAuth = JSON.stringify({ tokens: { access_token: "second-token", account_id: "second" } });
+  writeFileSync(path.join(primaryHome, "auth.json"), firstAuth, { mode: 0o600 });
+  writeFileSync(chatGPTSubscriptionAccountAuthPath(first.id, { homesDir }), firstAuth, { mode: 0o600 });
+  writeFileSync(chatGPTSubscriptionAccountAuthPath(second.id, { homesDir }), secondAuth, { mode: 0o600 });
+
+  const selected = await selectChatGPTProfileAccount(second.id, {
+    filePath,
+    homesDir,
+    primaryHome,
+    switchPath,
+    platform: "win32",
+    processList: '"ChatGPT.exe","123","Console","1","42 K"',
+    desktopStoppedByLifecycle: true,
+    refreshCatalog: false,
+  });
+
+  assert.equal(selected.profile.active, second.id);
+  assert.equal(selected.profile.pending, false);
+  assert.equal(selected.pool.policy.selectedAccountId, second.id);
+  assert.equal(readFileSync(path.join(primaryHome, "auth.json"), "utf8"), secondAuth);
+});
+
 test("a target auth rewrite during switching rolls back instead of installing another identity", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "codex-profile-target-drift-"));
   const primaryHome = path.join(root, "primary");

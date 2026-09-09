@@ -731,7 +731,7 @@ async function withRestartedLinuxCodexDesktop(operation, options = {}) {
       waitForLinuxDesktopToStop({ ...options, queryProcesses, stoppedProcesses });
       clientStopped = true;
     }
-    result = await operation();
+    result = await operation({ desktopStopped: true });
   } catch (error) {
     operationError = error;
     if (!clientStopped) {
@@ -806,7 +806,7 @@ async function withRestartedWindowsCodexDesktop(operation, options = {}) {
       waitForDesktopToStop({ ...options, queryProcesses });
       clientStopped = true;
     }
-    result = await operation();
+    result = await operation({ desktopStopped: true });
   } catch (error) {
     operationError = error;
     if (!clientStopped) {
@@ -842,5 +842,5 @@ export async function withRestartedCodexDesktop(operation, options = {}) {
   const platform = options.platform || process.platform;
   if (platform === "linux") return withRestartedLinuxCodexDesktop(operation, options);
   if (platform === "win32") return withRestartedWindowsCodexDesktop(operation, options);
-  return operation();
+  return operation({ desktopStopped: false });
 }

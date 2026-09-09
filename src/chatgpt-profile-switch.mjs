@@ -1143,7 +1143,11 @@ async function applyLocked(selection, options) {
     }
     sameAccountRefreshPending = !authFilesEqual(primary, targetProfile);
   }
-  if (codexDesktopRunning(options)) {
+  // The lifecycle wrapper has a stronger process-tree view than this module's
+  // portable tasklist/ps fallback. Once that wrapper has stopped and waited
+  // for the desktop tree, do not let a stale process-list row turn the direct
+  // switch back into a deferred one.
+  if (options.desktopStoppedByLifecycle !== true && codexDesktopRunning(options)) {
     return writeState({
       ...current,
       desired: target,

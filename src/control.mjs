@@ -3142,6 +3142,16 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
     setChatGPTAccountSwitchAutoRestart,
   } = await import("./chatgpt-account-switch-preference.mjs");
 
+  if (action === "menu-status") {
+    await ensureChatGPTProfileAccounts();
+    process.stdout.write(`${JSON.stringify({
+      ...chatGPTSubscriptionAccountPoolSnapshot(),
+      profile: chatGPTProfileSwitchSnapshot(),
+      preferences: readChatGPTAccountSwitchPreference(),
+    })}\n`);
+    return;
+  }
+
   if (!action || action === "status") {
     // This is the single production reconcile poll, owned by the Control
     // Center account view. It is read-only for settled state; after Codex has
@@ -3244,7 +3254,9 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
       throw new Error("Select a registered ChatGPT account id.");
     }
     const preferences = readChatGPTAccountSwitchPreference();
-    const select = () => selectChatGPTProfileAccount(selection);
+    const select = ({ desktopStopped = false } = {}) => selectChatGPTProfileAccount(selection, {
+      desktopStoppedByLifecycle: desktopStopped,
+    });
     let selected;
     if (preferences.autoRestart) {
       const { withRestartedCodexDesktop } = await import("./codex-desktop-lifecycle.mjs");
@@ -3266,7 +3278,7 @@ async function handleChatGptAccountSwitch(action, value, completionLease) {
       return;
     }
   }
-  throw new Error("Usage: control chatgpt-account-pool status|add [label]|home <acct_id>|login-finalize <acct_id> <lease>|remove <acct_id>|auto-restart <on|off>|select <acct_id>|profile status|profile reconcile");
+  throw new Error("Usage: control chatgpt-account-pool status|menu-status|add [label]|home <acct_id>|login-finalize <acct_id> <lease>|remove <acct_id>|auto-restart <on|off>|select <acct_id>|profile status|profile reconcile");
 }
 
 // The public `/health` leaf intentionally contains only the router summary and

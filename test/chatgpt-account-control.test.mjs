@@ -64,6 +64,10 @@ test("account selection persists without replacing another saved login", () => {
   assert.equal(status.accounts[added.id].label, "Secondary");
   assert.equal(status.accounts[added.id].state, "active");
   assert.equal(Object.keys(status.accounts).length, 2);
+  const menuStatus = run("chatgpt-account-pool", "menu-status");
+  assert.equal(menuStatus.accounts[added.id].label, "Secondary");
+  assert.equal(menuStatus.profile.desired, added.id);
+  assert.deepEqual(menuStatus.preferences, status.preferences);
 
   const primary = Object.keys(status.accounts).find((id) => id !== added.id);
   // Desktop runners queue the selection and headless runners apply it. Build

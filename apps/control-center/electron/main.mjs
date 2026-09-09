@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   Menu,
   nativeImage,
@@ -12,6 +13,8 @@ import path from "node:path";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { registerIpcHandlers } from "./ipc.mjs";
+import { runControlJson } from "./command-runner.mjs";
+import { chatGptAccountTrayTemplate } from "./tray-account-menu.mjs";
 import {
   createOpenRequestGate,
   createRendererReadyGate,
@@ -26,8 +29,11 @@ import { controlCenterDestination, controlCenterNavigationURL } from "./navigati
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEVELOPMENT_ICON = path.resolve(HERE, "..", "assets", "icon.png");
+const ACCOUNT_SWITCH_TIMEOUT_MS = 22 * 60_000;
 let mainWindow;
 let tray;
+let trayAccountSnapshot;
+let trayAccountBusy = false;
 let mutationLifecycle = {
   hasActiveMutations: () => false,
   whenMutationsIdle: () => Promise.resolve(),
@@ -269,11 +275,60 @@ function createTray() {
   const createdTray = new Tray(image);
   try {
     createdTray.setToolTip("Codex Router");
-    createdTray.setContextMenu(Menu.buildFromTemplate([
-      { label: "Open Control Center", click: showWindow },
-      { type: "separator" },
-      { label: "Quit Codex Router", click: () => app.quit() },
-    ]));
+    const showAccountError = (error) => {
+      void dialog.showMessageBox({
+        type: "error",
+        title: "OpenAI account operation failed",
+        message: String(error?.message || error || "The account operation failed."),
+      });
+    };
+    const refreshAccountMenu = async ({ full = false } = {}) => {
+      if (trayAccountBusy && !full) return;
+      try {
+        trayAccountSnapshot = await runControlJson([
+          "chatgpt-account-pool",
+          full ? "status" : "menu-status",
+        ], { timeoutMs: full ? 120_000 : 30_000 });
+      } catch (error) {
+        if (full) showAccountError(error);
+      } finally {
+        updateTrayMenu();
+      }
+    };
+    const switchAccount = async (accountId) => {
+      if (trayAccountBusy) return;
+      trayAccountBusy = true;
+      updateTrayMenu();
+      try {
+        trayAccountSnapshot = await runControlJson(
+          ["chatgpt-account-pool", "select", accountId],
+          { timeoutMs: ACCOUNT_SWITCH_TIMEOUT_MS },
+        );
+      } catch (error) {
+        showAccountError(error);
+      } finally {
+        trayAccountBusy = false;
+        await refreshAccountMenu();
+      }
+    };
+    const updateTrayMenu = () => {
+      if (createdTray.isDestroyed()) return;
+      createdTray.setContextMenu(Menu.buildFromTemplate([
+        { label: "Open Control Center", click: showWindow },
+        chatGptAccountTrayTemplate(trayAccountSnapshot, {
+          busy: trayAccountBusy,
+          onRefresh: () => { void refreshAccountMenu({ full: true }); },
+          onSwitch: (accountId) => { void switchAccount(accountId); },
+          onManage: () => {
+            showWindow();
+          },
+        }),
+        { type: "separator" },
+        { label: "Quit Codex Router", click: () => app.quit() },
+      ]));
+    };
+    updateTrayMenu();
+    void refreshAccountMenu();
     createdTray.on("click", showWindow);
   } catch (error) {
     createdTray.destroy();

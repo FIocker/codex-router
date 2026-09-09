@@ -1923,7 +1923,10 @@ export function registerIpcHandlers({
     );
   });
   handleAction("setChatGptAccountSelection", async ({ selection } = {}) => {
-    return runJson(["chatgpt-account-pool", "select", stringValue(selection, "Account selection", CHATGPT_ACCOUNT_ID)], { timeoutMs: 120_000 });
+    return runJson(
+      ["chatgpt-account-pool", "select", stringValue(selection, "Account selection", CHATGPT_ACCOUNT_ID)],
+      { timeoutMs: CATALOG_MUTATION_TIMEOUT_MS },
+    );
   });
   handleAction("setPresence", async ({ mode } = {}) => runJson(["presence", "set", oneOf(mode, PRESENCE_MODES, "Presence mode")]));
   handleAction("controlService", async ({ action = "status" } = {}) => {

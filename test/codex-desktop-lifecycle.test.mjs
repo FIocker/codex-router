@@ -179,9 +179,10 @@ test("the Linux client cycle stops, swaps, and relaunches in order", async () =>
   let running = true;
   const events = [];
   const result = await withRestartedCodexDesktop(
-    async () => {
+    async (context) => {
       events.push("operation");
       assert.equal(running, false);
+      assert.deepEqual(context, { desktopStopped: true });
       return "done";
     },
     {
