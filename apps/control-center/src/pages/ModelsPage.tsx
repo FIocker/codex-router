@@ -29,6 +29,7 @@ import type {
   RouterKnownModel,
   RouterModel,
   RouterTarget,
+  SubagentSettings,
 } from "../types";
 import "./providers-models.css";
 
@@ -118,19 +119,19 @@ function subagentCertification(model: RouterModel): "v1" | "v2" | "unknown" | st
     ?? (model.multiAgentVersion === "v1" ? "v1" : "unknown");
 }
 
-function subagentEnabled(target: RouterTarget, slug: string, settings = target.modelSettings?.subagents): boolean {
-  if (!settings) return false;
+function subagentEnabled(model: RouterModel | undefined, settings: SubagentSettings | undefined): boolean {
+  if (!settings || !model) return false;
+  const slug = model.slug;
   if (settings.disabled.includes(slug)) return false;
-  const model = target.models.find((entry) => entry.slug === slug);
-  if (!model || model.visible === false) return false;
-  // Certified routes remain active unless explicitly disabled; selected mode
-  // does not silently turn off every other registry-v2 route. For an unknown
-  // route, a selected-mode entry means only that its compatibility test was
-  // requested — it never becomes an active subagent here.
+  if (model.visible === false) return false;
+  // Certified routes remain active unless explicitly disabled. Otherwise the
+  // effective selection mirrors applyMultiAgentSettings while a republished
+  // catalog snapshot is still replacing the older one on screen.
   if (subagentCertification(model) === "v2") {
     return true;
   }
-  return settings.mode === "selected" && settings.enabled.includes(slug);
+  return settings.mode === "all"
+    || (settings.mode === "selected" && settings.enabled.includes(slug));
 }
 
 function nativeClientManaged(model: RouterModel): boolean {
@@ -275,8 +276,8 @@ export function ModelsPage({ target, catalog, setup, usage, api, refreshing, dat
   const pickerStates = useMemo(() => new Map(models.map((model) => [model.slug, model.visible])), [models]);
   const subagentStates = useMemo(() => new Map(models.map((model) => [
     model.slug,
-    Boolean(target && subagentEnabled(target, model.slug, subagentSettings)),
-  ])), [models, subagentSettings, target]);
+    subagentEnabled(model, subagentSettings),
+  ])), [models, subagentSettings]);
   const subagentEffortStates = useMemo(() => new Map(models.map((model) => [
     model.slug,
     subagentSettings?.efforts?.[model.slug] ?? "default",
@@ -596,7 +597,7 @@ export function ModelsPage({ target, catalog, setup, usage, api, refreshing, dat
       apiAvailable={Boolean(api)}
       providerNames={providerNames}
       pickerValue={(model) => optimisticPicker.value(model.slug, model.visible)}
-      subagentValue={(model) => optimisticSubagents.value(model.slug, Boolean(subagentEnabled(target, model.slug, subagentSettings)))}
+      subagentValue={(model) => optimisticSubagents.value(model.slug, subagentEnabled(model, subagentSettings))}
       effortValue={(model) => optimisticSubagentEfforts.value(model.slug, subagentSettings?.efforts?.[model.slug] ?? "default")}
       onFamilyPicker={(visible) => void updateFamilyPicker(family, usable, inPicker, visible)}
       onRoutePicker={(model, visible) => void updatePicker(model.slug, visible)}

@@ -30,10 +30,13 @@ test("Control Center keeps legacy local proofs as candidates, not active v2 rout
     path.join(root, "apps", "control-center", "src", "pages", "ModelsPage.tsx"),
     "utf8",
   );
-  assert.match(source, /if \(!model \|\| model\.visible === false\) return false/);
+  assert.match(source, /if \(!settings \|\| !model\) return false/);
+  assert.match(source, /if \(model\.visible === false\) return false/);
   assert.match(source, /if \(subagentCertification\(model\) === "v2"\)/);
   assert.match(source, /model\.multiAgentVersion === "v1" \? "v1" : "unknown"/);
+  assert.match(source, /settings\.mode === "all"/);
   assert.match(source, /settings\.mode === "selected" && settings\.enabled\.includes\(slug\)/);
+  assert.doesNotMatch(source, /target\.models\.find/);
 
   // The switch adds the route to the subagent selection, which the router
   // publishes as v2. It never asks a local probe to decide that.

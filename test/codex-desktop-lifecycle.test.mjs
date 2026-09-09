@@ -758,14 +758,56 @@ test("the Store activation fallback keeps elseif and else attached to the condit
   assert.doesNotMatch(fallback, /\}; (?:elseif|else)/);
 });
 
-test("pre-switch verification still rejects a ChatGPT process with a hidden path", async () => {
+test("an elevated ChatGPT process can switch after the Store package is verified", async () => {
+  const elevatedHost = { name: "chatgpt.exe", pid: 456, parentPid: 1, executablePath: "" };
+  const bundledCli = { name: "codex.exe", pid: 457, parentPid: 456, executablePath: "" };
+  let processes = [elevatedHost, bundledCli];
+  const events = [];
+  const result = await withRestartedCodexDesktop(async () => {
+    events.push("operation");
+    return "done";
+  }, {
+    platform: "win32",
+    queryProcesses: () => processes,
+    discoverLaunch: () => ({
+      executablePath: "C:\\Program Files\\WindowsApps\\OpenAI.Codex_99\\app\\ChatGPT.exe",
+      appId: "OpenAI.Codex_2p2nqsd0c76g0!App",
+    }),
+    stopImpl: () => {
+      events.push("stop");
+      processes = [];
+    },
+    startImpl: () => events.push("start"),
+  });
+  assert.equal(result, "done");
+  assert.deepEqual(events, ["stop", "operation", "start"]);
+});
+
+test("a hidden ChatGPT process remains fail-closed when the Store package cannot be verified", async () => {
+  let operated = false;
   await assert.rejects(
-    withRestartedCodexDesktop(async () => "done", {
+    withRestartedCodexDesktop(async () => {
+      operated = true;
+    }, {
       platform: "win32",
       queryProcesses: () => [{ name: "chatgpt.exe", pid: 456, executablePath: "" }],
+      discoverLaunch: () => ({ executablePath: "", appId: "" }),
     }),
-    /could not verify.*executable/i,
+    /installed Codex desktop app could not be found/i,
   );
+  assert.equal(operated, false);
+});
+
+test("a hidden elevated ChatGPT process skips PID killing and uses the verified-package stop", () => {
+  const commands = [];
+  stopWindowsProcessTree([{ name: "chatgpt.exe", pid: 456, executablePath: "" }], {
+    spawnImpl: (command, args) => {
+      commands.push([command, args]);
+      return { status: 0, stdout: "" };
+    },
+  });
+  assert.deepEqual(commands.map(([command]) => command), ["powershell.exe"]);
+  assert.match(commands[0][1].at(-1), /Start-Process/);
 });
 
 test("the elevated stop re-enumerates the official package after UAC", () => {

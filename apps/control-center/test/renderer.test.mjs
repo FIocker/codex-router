@@ -102,7 +102,9 @@ const bridgeSource = String.raw`
       { id: "kilo-free", displayName: "Kilo Free", kind: "anonymous" },
       ...oxProviders.map(({ id, displayName, kind }) => ({ id, displayName, kind })),
     ],
-    models: [selectedModel, ...activeOxModels],
+    // Deliberately stale: the aggregate catalog below is the effective model
+    // snapshot after a settings republish and must win in the Models page.
+    models: [{ ...selectedModel, multiAgentVersion: "v1", subagentCertification: "unknown" }, ...activeOxModels],
     modelSettings: {
       subagents,
       picker: { hidden: [], visible: [selectedModel.slug], hasExplicitVisibility: true },
@@ -789,6 +791,9 @@ test("the production renderer exposes model discovery and picker actions", { tim
     // rule, leaving only its top edge visible.
     const selectedFamily = page.locator(".pm-family-row").filter({ hasText: "DeepSeek Chat" });
     await selectedFamily.locator(".pm-family-open").click();
+    assert.equal(await selectedFamily.getByRole("checkbox", {
+      name: "Use DeepSeek Chat through DeepSeek as a subagent",
+    }).isChecked(), true);
     const thinkingTrigger = selectedFamily.getByRole("button", {
       name: "DeepSeek Chat DeepSeek subagent thinking effort",
     });

@@ -498,8 +498,14 @@ export function discoverWindowsCodexLaunch(options = {}) {
   };
 }
 
-function rootDesktopProcessIds(processes) {
-  const desktop = processes.filter(isCodexDesktopHost);
+function isHiddenWindowsCodexDesktop(record) {
+  return record.name === "chatgpt.exe" && !record.executablePath;
+}
+
+function rootDesktopProcessIds(processes, { includeHidden = false } = {}) {
+  const desktop = processes.filter(
+    (record) => isCodexDesktopHost(record) || (includeHidden && isHiddenWindowsCodexDesktop(record)),
+  );
   const desktopIds = new Set(desktop.map((record) => record.pid).filter(Number.isInteger));
   const roots = desktop
     .filter((record) => Number.isInteger(record.pid) && !desktopIds.has(record.parentPid))
@@ -507,8 +513,8 @@ function rootDesktopProcessIds(processes) {
   return roots.length ? roots : [...desktopIds];
 }
 
-function windowsDesktopProcessTree(processes) {
-  const memberIds = new Set(rootDesktopProcessIds(processes));
+function windowsDesktopProcessTree(processes, options = {}) {
+  const memberIds = new Set(rootDesktopProcessIds(processes, options));
   let changed = true;
   while (changed) {
     changed = false;
@@ -526,9 +532,9 @@ function windowsDesktopProcessTree(processes) {
   return processes.filter((record) => memberIds.has(record.pid));
 }
 
-function hasStandaloneWindowsCodexCli(processes) {
+function hasStandaloneWindowsCodexCli(processes, options = {}) {
   const desktopMembers = new Set(
-    windowsDesktopProcessTree(processes)
+    windowsDesktopProcessTree(processes, options)
       .map((record) => record.pid)
       .filter(Number.isSafeInteger),
   );
@@ -537,24 +543,27 @@ function hasStandaloneWindowsCodexCli(processes) {
 
 export function stopWindowsProcessTree(processes, options = {}) {
   const pids = rootDesktopProcessIds(processes);
-  if (!pids.length) return;
-  const pidArgs = pids.flatMap((pid) => ["/PID", String(pid)]);
+  const hiddenDesktop = processes.some(isHiddenWindowsCodexDesktop);
+  if (!pids.length && !hiddenDesktop) return;
   const spawn = options.spawnImpl || spawnSync;
-  const graceful = spawn("taskkill.exe", ["/T", ...pidArgs], {
-    encoding: "utf8",
-    timeout: CLIENT_STOP_TIMEOUT_MS,
-    windowsHide: true,
-  });
-  if (graceful.status === 0 && desktopStoppedWithin(options, CLIENT_GRACEFUL_STOP_MS)) return;
+  if (pids.length) {
+    const pidArgs = pids.flatMap((pid) => ["/PID", String(pid)]);
+    const graceful = spawn("taskkill.exe", ["/T", ...pidArgs], {
+      encoding: "utf8",
+      timeout: CLIENT_STOP_TIMEOUT_MS,
+      windowsHide: true,
+    });
+    if (graceful.status === 0 && desktopStoppedWithin(options, CLIENT_GRACEFUL_STOP_MS)) return;
 
-  const direct = spawn("taskkill.exe", ["/F", "/T", ...pidArgs], {
-    encoding: "utf8",
-    timeout: CLIENT_STOP_TIMEOUT_MS,
-    windowsHide: true,
-  });
-  if (direct.status === 0) return;
-  const afterDirect = (options.queryProcesses || windowsCodexProcesses)(options);
-  if (afterDirect && !afterDirect.some(isCodexDesktopHost)) return;
+    const direct = spawn("taskkill.exe", ["/F", "/T", ...pidArgs], {
+      encoding: "utf8",
+      timeout: CLIENT_STOP_TIMEOUT_MS,
+      windowsHide: true,
+    });
+    if (direct.status === 0 && desktopStoppedWithin(options, CLIENT_GRACEFUL_STOP_MS)) return;
+    const afterDirect = (options.queryProcesses || windowsCodexProcesses)(options);
+    if (afterDirect && !afterDirect.some((record) => record.name === "chatgpt.exe")) return;
+  }
 
   // Re-enumerate only the official Store package after the UAC prompt. PIDs
   // captured before an operator answered UAC may already belong to something
@@ -587,7 +596,7 @@ export function stopWindowsProcessTree(processes, options = {}) {
   });
   if (elevated.status !== 0) {
     const afterElevated = (options.queryProcesses || windowsCodexProcesses)(options);
-    if (afterElevated && !afterElevated.some(isCodexDesktopHost)) return;
+    if (afterElevated && !afterElevated.some((record) => record.name === "chatgpt.exe")) return;
     throw new Error("Codex could not be closed. Approve the Windows administrator prompt and try again.");
   }
 }
@@ -601,7 +610,7 @@ function desktopStoppedWithin(options, timeoutMs) {
   while (Date.now() < deadline) {
     const processes = (options.queryProcesses || windowsCodexProcesses)(options);
     if (!processes) throw new Error("Could not verify that Codex closed; no login was changed.");
-    if (!processes.some((record) => isCodexDesktopHost(record) || isCodexCli(record))) return true;
+    if (!processes.some((record) => record.name === "chatgpt.exe" || isCodexCli(record))) return true;
     (options.sleepImpl || sleep)(100);
   }
   return false;
@@ -771,19 +780,21 @@ async function withRestartedWindowsCodexDesktop(operation, options = {}) {
   const queryProcesses = options.queryProcesses || windowsCodexProcesses;
   const before = queryProcesses(options);
   if (!before) throw new Error("Could not inspect the Codex desktop process; no login was changed.");
-  if (before.some((record) => record.name === "chatgpt.exe" && !record.executablePath)) {
-    throw new Error("Could not verify the Codex desktop executable; no login was changed.");
-  }
-  const wasRunning = before.some(isCodexDesktopHost);
-  if (hasStandaloneWindowsCodexCli(before)) {
-    throw new Error("A standalone Codex CLI process is running. Close it before switching ChatGPT accounts.");
-  }
+  const hiddenDesktop = before.some(isHiddenWindowsCodexDesktop);
+  const wasRunning = hiddenDesktop || before.some(isCodexDesktopHost);
   const discoverLaunch = options.discoverLaunch || discoverWindowsCodexLaunch;
   const launch = wasRunning || options.alwaysRestart
     ? discoverLaunch(options)
     : { executablePath: "", appId: "" };
   if ((wasRunning || options.alwaysRestart) && !launch?.executablePath && !launch?.appId) {
     throw new Error("The installed Codex desktop app could not be found; no login was changed.");
+  }
+  // A non-elevated tray cannot inspect an elevated ChatGPT executable. Only
+  // after the exact Store package has been resolved may that hidden process
+  // anchor the desktop tree; the elevated stop independently re-enumerates
+  // and terminates only the executable from that verified package.
+  if (hasStandaloneWindowsCodexCli(before, { includeHidden: hiddenDesktop })) {
+    throw new Error("A standalone Codex CLI process is running. Close it before switching ChatGPT accounts.");
   }
 
   let clientStopped = !wasRunning;
@@ -802,7 +813,7 @@ async function withRestartedWindowsCodexDesktop(operation, options = {}) {
       const afterFailure = queryProcesses(options);
       clientStopped = Boolean(
         afterFailure &&
-        !afterFailure.some((record) => isCodexDesktopHost(record) || isCodexCli(record)),
+        !afterFailure.some((record) => record.name === "chatgpt.exe" || isCodexCli(record)),
       );
     }
   }

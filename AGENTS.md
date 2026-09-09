@@ -1426,6 +1426,27 @@ finalizer remains the sole owner of the durable login lease and projected login
 attempt once a child has been attached. `test/control-center-harness.test.mjs`
 guards the cancellation followed by another account mutation.
 
+## Elevated Windows ChatGPT account switching stays package-bound
+
+ChatGPT is commonly launched elevated while the tray is not. In that case
+Windows exposes `ChatGPT.exe` and its PID but hides `ExecutablePath`; rejecting
+that shape makes every account switch fail before credentials are touched.
+Treat it as the desktop host only after `discoverWindowsCodexLaunch` resolves
+the exact `OpenAI.Codex_2p2nqsd0c76g0` Store package. Never send its unverified
+PID to `taskkill`: the elevated helper must re-enumerate after UAC and stop only
+the `ChatGPT.exe` whose full path equals the verified package path. If package
+resolution fails, or any `ChatGPT.exe`/`codex.exe` remains afterward, change no
+credentials. Include descendants of the hidden host when distinguishing the
+bundled app server from a standalone Codex CLI. The lifecycle tests pin the
+verified success, unresolved refusal, and elevated re-enumeration paths.
+
+The Control Center subagent switch reflects the effective model from the
+aggregate catalog it is rendering. Do not re-resolve that slug through
+`target.models`: the target snapshot can lag the catalog republish and make a
+durably saved selection appear to reset. Explicit `disabled` still wins;
+otherwise registry/published v2, `all`, and selected-mode membership mirror
+`applyMultiAgentSettings`.
+
 ## The macOS app icon is committed, not built during a tray build
 
 `apps/macos/ModelRouterTray/Resources/AppIcon.svg` is the source and

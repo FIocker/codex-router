@@ -1,5 +1,15 @@
 # Changelog
 
+- **Subagent switches now retain the effective published state in Control Center.**
+  The Models page reads the catalog model it is rendering instead of looking
+  the slug up again in a potentially stale target snapshot, and `all` mode is
+  reflected directly while a settings refresh is settling.
+- **Elevated ChatGPT can now be restarted safely during account switches on Windows.**
+  A non-elevated tray accepts a hidden `ChatGPT.exe` path only after resolving
+  the exact `OpenAI.Codex` Store package. The UAC helper then re-enumerates and
+  stops only that package executable before credentials change, while an
+  unresolved process or a standalone Codex CLI still blocks the operation.
+
 ## Unreleased
 
 - **Cancelling ChatGPT account sign-in no longer blocks the account menu.** An
