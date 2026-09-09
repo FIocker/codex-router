@@ -794,6 +794,14 @@ surfaces.
    the tray must say usage is unavailable rather than showing stale or empty
    numbers. Routed request/token accounting comes from the shared usage-events
    pipeline and needs no per-provider work beyond correct event recording.
+   - This private build reads Antigravity's
+     `v1internal:retrieveUserQuotaSummary` with the router-managed OAuth
+     session. Publish only the Gemini group's 5-hour and weekly remaining
+     fractions and reset times; the same account response can contain
+     Claude/GPT pools that this provider does not route. Refresh a stale token
+     normally and retry one 401 with a forced refresh. This is a read-only,
+     non-generation request and must never expose the access or refresh token
+     in the snapshot, logs, or support bundle.
 
 ## Vision bridge for text-only models
 

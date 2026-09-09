@@ -1,5 +1,11 @@
 import { readFileSync } from "node:fs";
 
+import {
+  ANTIGRAVITY_ENDPOINT,
+  antigravityBootstrapHeaders,
+} from "./antigravity-oauth-constants.mjs";
+import { ensureFreshAntigravitySession } from "./antigravity-oauth-session.mjs";
+import { antigravityOAuthStatus } from "./antigravity-oauth-status.mjs";
 import { grokOAuthStatus, grokSessionEntry } from "./grok-oauth-status.mjs";
 import { ensureFreshGrokOAuthToken } from "./grok-oauth-session.mjs";
 import { ensureFreshKimiOAuthToken, kimiIdentityHeaders } from "./kimi-oauth-session.mjs";
@@ -449,6 +455,58 @@ export function githubCopilotQuotaMetrics(payload) {
   return metrics;
 }
 
+function antigravityBucketLabel(value) {
+  const label = typeof value === "string" ? value.trim() : "";
+  if (/five[ -]hour/i.test(label)) return "5-hour limit";
+  if (/weekly/i.test(label)) return "Weekly limit";
+  return label || "Antigravity limit";
+}
+
+export function antigravityQuotaMetrics(payload) {
+  const groups = Array.isArray(payload?.groups)
+    ? payload.groups
+    : Array.isArray(payload?.quotaGroups)
+      ? payload.quotaGroups
+      : [];
+  // The account endpoint can also report Claude/GPT pools that this private
+  // provider does not route. Prefer the Gemini group so the displayed
+  // allowance describes only requests this router can actually spend.
+  const geminiGroups = groups.filter((group) =>
+    /gemini/i.test(`${group?.displayName || ""} ${group?.description || ""}`),
+  );
+  const metrics = [];
+  for (const group of geminiGroups) {
+    if (!group || typeof group !== "object") continue;
+    const buckets = Array.isArray(group.buckets)
+      ? group.buckets
+      : Array.isArray(group.quotaBuckets)
+        ? group.quotaBuckets
+        : [];
+    for (const bucket of buckets) {
+      if (!bucket || typeof bucket !== "object") continue;
+      const fraction = numberValue(bucket.remainingFraction);
+      if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1) continue;
+      const remainingPercent = fraction * 100;
+      const resetAt = resetTimestamp(bucket.resetTime ?? bucket.reset_time);
+      metrics.push({
+        kind: "quota",
+        label: antigravityBucketLabel(bucket.displayName),
+        usedPercent: 100 - remainingPercent,
+        remainingPercent,
+        used: 100 - remainingPercent,
+        limit: 100,
+        remaining: remainingPercent,
+        unit: "percent",
+        ...(resetAt !== undefined ? { resetAt } : {}),
+      });
+    }
+  }
+  const order = new Map([["5-hour limit", 0], ["Weekly limit", 1]]);
+  return metrics.sort(
+    (left, right) => (order.get(left.label) ?? 2) - (order.get(right.label) ?? 2),
+  );
+}
+
 async function requestJson(url, key, headers = {}, fetchImpl = fetch) {
   const response = await fetchImpl(url, {
     method: "GET",
@@ -465,6 +523,55 @@ async function requestJson(url, key, headers = {}, fetchImpl = fetch) {
     throw error;
   }
   return response.json();
+}
+
+async function requestJsonPost(url, key, body, headers = {}, fetchImpl = fetch) {
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    const error = new Error(`HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return response.json();
+}
+
+const ANTIGRAVITY_QUOTA_URL =
+  `${ANTIGRAVITY_ENDPOINT}/v1internal:retrieveUserQuotaSummary`;
+
+async function antigravityAccount(fetchImpl) {
+  if (!antigravityOAuthStatus().configured) {
+    return { status: "not-configured", source: "official-api", metrics: [] };
+  }
+
+  const readQuota = (session) => requestJsonPost(
+    ANTIGRAVITY_QUOTA_URL,
+    session.access_token,
+    {},
+    antigravityBootstrapHeaders(session.access_token),
+    fetchImpl,
+  );
+  let session = await ensureFreshAntigravitySession({ fetchImpl });
+  let payload;
+  try {
+    payload = await readQuota(session);
+  } catch (error) {
+    if (error?.status !== 401) throw error;
+    session = await ensureFreshAntigravitySession({ force: true, fetchImpl });
+    payload = await readQuota(session);
+  }
+  const metrics = antigravityQuotaMetrics(payload);
+  if (!metrics.length) throw new Error("Antigravity quota response did not include Gemini limits");
+  return { status: "available", source: "official-api", metrics };
 }
 
 async function deepSeekAccount(fetchImpl) {
@@ -976,6 +1083,7 @@ async function accountUsageFor(providerId, fetchImpl) {
     if (providerId === "commandcode") return await commandCodeAccount(fetchImpl);
     if (providerId === "venice") return await veniceAccount(fetchImpl);
     if (providerId === "openrouter") return await openRouterAccount(fetchImpl);
+    if (providerId === "antigravity-oauth") return await antigravityAccount(fetchImpl);
     if (providerId === "nousresearch") {
       // Nous Portal shows credits and the subscription tier only in the
       // browser: the inference API answers 404 on both /credits and /key, so

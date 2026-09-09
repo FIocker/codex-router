@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Google Antigravity allowances now appear in Usage.** The router reads the
+  provider's non-billable quota-summary endpoint with its managed OAuth
+  session, refreshes and retries once after an authorization failure, and
+  publishes the Gemini 5-hour and weekly percentages and reset times to
+  Accounts and allowances. Unrouted Claude/GPT quota pools are excluded.
+
 - **ChatGPT account creation no longer sits indefinitely on an optimistic row.**
   A new account now reports lock contention after a bounded wait, the Control
   Center removes its local "Saving account" row before slower reconciliation,

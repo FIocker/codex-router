@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
+  antigravityQuotaMetrics,
   chutesBalanceMetrics,
   chutesSubscriptionMetrics,
   commandCodeCreditsMetrics,
@@ -17,6 +21,162 @@ import {
   providerAccountUsageSnapshot,
   veniceBalanceMetrics,
 } from "../src/provider-account-usage.mjs";
+
+test("normalizes only the routed Gemini Antigravity quota windows", () => {
+  assert.deepEqual(antigravityQuotaMetrics({
+    groups: [
+      {
+        displayName: "Gemini Models",
+        buckets: [
+          {
+            displayName: "Weekly Limit Remaining",
+            remainingFraction: 0.75,
+            resetTime: "2026-09-13T14:30:10Z",
+          },
+          {
+            displayName: "Five Hour Limit Remaining",
+            remainingFraction: 0.5,
+            resetTime: "2026-09-09T14:27:42Z",
+          },
+        ],
+      },
+      {
+        displayName: "Claude and GPT models",
+        buckets: [{ displayName: "Weekly Limit Remaining", remainingFraction: 1 }],
+      },
+    ],
+  }), [
+    {
+      kind: "quota",
+      label: "5-hour limit",
+      usedPercent: 50,
+      remainingPercent: 50,
+      used: 50,
+      limit: 100,
+      remaining: 50,
+      unit: "percent",
+      resetAt: 1_788_964_062,
+    },
+    {
+      kind: "quota",
+      label: "Weekly limit",
+      usedPercent: 25,
+      remainingPercent: 75,
+      used: 25,
+      limit: 100,
+      remaining: 75,
+      unit: "percent",
+      resetAt: 1_789_309_810,
+    },
+  ]);
+  assert.deepEqual(antigravityQuotaMetrics({
+    groups: [{
+      displayName: "Claude and GPT models",
+      buckets: [{ displayName: "Weekly Limit Remaining", remainingFraction: 1 }],
+    }],
+  }), []);
+});
+
+test("Antigravity usage reads Gemini limits without exposing its OAuth token", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "codex-router-antigravity-usage-"));
+  const tokenPath = path.join(directory, "antigravity-oauth.json");
+  const previousPath = process.env.ANTIGRAVITY_TOKEN_PATH;
+  process.env.ANTIGRAVITY_TOKEN_PATH = tokenPath;
+  writeFileSync(tokenPath, JSON.stringify({
+    access_token: "TEST_ANTIGRAVITY_ACCESS_TOKEN",
+    refresh_token: "TEST_ANTIGRAVITY_REFRESH_TOKEN",
+    expires_at: Math.floor(Date.now() / 1_000) + 3_600,
+    expires_in: 3_600,
+    project_id: "test-project",
+    project_source: "managed",
+  }));
+  try {
+    const snapshot = await providerAccountUsageSnapshot({
+      providerIds: ["antigravity-oauth"],
+      fetchImpl: async (url, options) => {
+        assert.equal(
+          url,
+          "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+        );
+        assert.equal(options.method, "POST");
+        assert.equal(options.body, "{}");
+        assert.equal(options.headers.Authorization, "Bearer TEST_ANTIGRAVITY_ACCESS_TOKEN");
+        assert.match(options.headers["User-Agent"], /^antigravity\//);
+        return new Response(JSON.stringify({
+          groups: [{
+            displayName: "Gemini Models",
+            buckets: [
+              { displayName: "Weekly Limit Remaining", remainingFraction: 0.8 },
+              { displayName: "Five Hour Limit Remaining", remainingFraction: 0.6 },
+            ],
+          }],
+        }));
+      },
+    });
+    assert.equal(snapshot["antigravity-oauth"].status, "available");
+    assert.deepEqual(
+      snapshot["antigravity-oauth"].metrics.map((metric) => [metric.label, metric.remainingPercent]),
+      [["5-hour limit", 60], ["Weekly limit", 80]],
+    );
+    assert.doesNotMatch(JSON.stringify(snapshot), /TEST_ANTIGRAVITY/);
+  } finally {
+    if (previousPath === undefined) delete process.env.ANTIGRAVITY_TOKEN_PATH;
+    else process.env.ANTIGRAVITY_TOKEN_PATH = previousPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Antigravity usage refreshes once when Google rejects the access token", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "codex-router-antigravity-retry-"));
+  const tokenPath = path.join(directory, "antigravity-oauth.json");
+  const previousPath = process.env.ANTIGRAVITY_TOKEN_PATH;
+  process.env.ANTIGRAVITY_TOKEN_PATH = tokenPath;
+  writeFileSync(tokenPath, JSON.stringify({
+    access_token: "TEST_ANTIGRAVITY_STALE_TOKEN",
+    refresh_token: "TEST_ANTIGRAVITY_RETRY_TOKEN",
+    expires_at: Math.floor(Date.now() / 1_000) + 3_600,
+    expires_in: 3_600,
+  }));
+  const quotaUrl =
+    "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
+  let quotaReads = 0;
+  try {
+    const snapshot = await providerAccountUsageSnapshot({
+      providerIds: ["antigravity-oauth"],
+      fetchImpl: async (url, options) => {
+        if (url === "https://oauth2.googleapis.com/token") {
+          assert.match(String(options.body), /refresh_token=TEST_ANTIGRAVITY_RETRY_TOKEN/);
+          return new Response(JSON.stringify({
+            access_token: "TEST_ANTIGRAVITY_FRESH_TOKEN",
+            expires_in: 3_600,
+            token_type: "Bearer",
+          }));
+        }
+        assert.equal(url, quotaUrl);
+        quotaReads += 1;
+        if (quotaReads === 1) {
+          assert.equal(options.headers.Authorization, "Bearer TEST_ANTIGRAVITY_STALE_TOKEN");
+          return new Response("unauthorized", { status: 401 });
+        }
+        assert.equal(options.headers.Authorization, "Bearer TEST_ANTIGRAVITY_FRESH_TOKEN");
+        return new Response(JSON.stringify({
+          groups: [{
+            displayName: "Gemini Models",
+            buckets: [{ displayName: "Weekly Limit Remaining", remainingFraction: 0.9 }],
+          }],
+        }));
+      },
+    });
+    assert.equal(quotaReads, 2);
+    assert.equal(snapshot["antigravity-oauth"].status, "available");
+    assert.equal(snapshot["antigravity-oauth"].metrics[0].remainingPercent, 90);
+    assert.doesNotMatch(JSON.stringify(snapshot), /TEST_ANTIGRAVITY/);
+  } finally {
+    if (previousPath === undefined) delete process.env.ANTIGRAVITY_TOKEN_PATH;
+    else process.env.ANTIGRAVITY_TOKEN_PATH = previousPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("Venice reports every pool that can fund a request", () => {
   assert.deepEqual(veniceBalanceMetrics({
